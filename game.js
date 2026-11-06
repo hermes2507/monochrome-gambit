@@ -199,6 +199,7 @@ function newGame(mode, variant = prefVariant, names = null, ownership = prefOwne
     flash: new Map(), // piece id -> 'all' | player who may see the flash
     awaiting: null,   // player whose move input the engine is waiting on (online)
     challenge: null,  // free disputes: the rival's last move, open to dispute this turn
+    dispute: null,    // the latest dispute, kept on screen so players can see what happened
   };
   for (const p of [0, 1]) {
     // Card mode: everyone starts with one Dispute. Free disputes need no card.
@@ -214,9 +215,9 @@ function newGame(mode, variant = prefVariant, names = null, ownership = prefOwne
 
 /* -------------------------- Effects for players ------------------------- */
 // Public effects are shown locally and mirrored to an online guest.
-function bannerAll(big, small, cls) {
-  if (S.mode === 'online') NET.sendNow({ t: 'fx', k: 'banner', a: [big, small, cls] });
-  return banner(big, small, cls);
+function bannerAll(big, small, cls, ms) {
+  if (S.mode === 'online') NET.sendNow({ t: 'fx', k: 'banner', a: [big, small, cls, ms] });
+  return banner(big, small, cls, ms);
 }
 // Private effects are shown only to player p.
 function bannerTo(p, big, small, cls) {
@@ -229,9 +230,10 @@ function showCardAll(p, key) {
   return showCard(p, key);
 }
 // Ask player p a question; answered locally or by the remote guest.
+// These are always about the board (disputes), so they open as a sheet that keeps it visible.
 function promptPlayer(p, html, buttons) {
   if (isRemote(p)) return NET.ask(html, buttons);
-  return modal(html, buttons);
+  return modal(html, buttons, { sheet: true });
 }
 function flash(ids, who = 'all') {
   for (const id of ids) S.flash.set(id, who);
@@ -504,6 +506,8 @@ function remoteMovePhase(p) {
 async function executeMove(p, m) {
   S.phase = 'resolving';
   S.challenge = null; // moving accepts the rival's last move
+  // The dispute recap survives one more move, so a quick reply doesn't wipe it away.
+  if (S.dispute) { if (S.dispute.age >= 1) S.dispute = null; else S.dispute.age++; }
   const snap = JSON.parse(JSON.stringify({ board: S.board, captured: S.captured }));
   const pc = S.board[m.fr][m.fc];
   const cap = S.board[m.tr][m.tc];
@@ -563,9 +567,13 @@ async function reactionWindow(p, pc, info) {
 // result costs o this turn (the caller ends it) instead of their next one.
 async function resolveDispute(p, pc, info, { card = null, sure = false, deferred = false } = {}) {
   const o = 1 - p;
+  const m = info.m;
+  // Mark the disputed move on the board and keep it in view while it resolves.
+  S.dispute = { by: o, mover: p, type: pc.type, fr: m.fr, fc: m.fc, tr: m.tr, tc: m.tc, stage: 'pending', sure, deferred, age: 0 };
+  render(); focusBoard();
   if (sure) await useCard(o, 'sure');
   else if (card) await useCard(o, card);
-  else await W(bannerAll('DISPUTE!', `${pname(o)} ${vb(o, 'challenge')} the move`, 'gold'));
+  await W(bannerAll('DISPUTE!', `${pname(o)} ${vb(o, 'challenge')} the ${TYPES[pc.type].n} ${sqName(m.tr, m.tc)}`, 'gold', 1700));
   log(`${pname(o)} ${vb(o, 'dispute')} the move${sure ? ' with a Sure Dispute' : ''}!`, 'hot');
 
   if (hasCard(p, 'counter')) {
@@ -575,7 +583,8 @@ async function resolveDispute(p, pc, info, { card = null, sure = false, deferred
     if (c) {
       await useCard(p, 'counter');
       log('Counter-dispute! The dispute is void and nothing is revealed.', 'cool');
-      await W(bannerAll('COUNTERED', 'The dispute is void', 'cool'));
+      S.dispute.stage = 'countered'; render();
+      await W(bannerAll('COUNTERED', 'The dispute is void', 'cool', 2200));
       return 'ok';
     }
   }
@@ -595,8 +604,9 @@ async function resolveDispute(p, pc, info, { card = null, sure = false, deferred
       sub = `${pname(o)} ${vb(o, 'lose')} a turn`;
       log(`Honest move — that piece belongs to ${nm(owner)}. ${pname(o)} ${vb(o, 'lose')} a turn.`, 'good');
     }
+    S.dispute.stage = 'honest';
     render();
-    await W(bannerAll('HONEST!', sub, 'good'));
+    await W(bannerAll('HONEST!', sub, 'good', 2600));
     return 'honest';
   }
   // Caught bluffing: undo the move, reveal the piece, mover loses a turn.
@@ -606,9 +616,11 @@ async function resolveDispute(p, pc, info, { card = null, sure = false, deferred
   if (info.cap) { const c2 = findPiece(info.cap.id); if (c2) reveal(c2); }
   S.skips[p]++;
   S.lastMove = null;
+  S.dispute.stage = 'caught';
+  S.anim = { id, fr: m.tr, fc: m.tc, tr: m.fr, tc: m.fc }; // slide the piece back
   log(`Caught! That piece belongs to ${nm(owner)}. The move is undone and ${pname(p)} ${vb(p, 'lose')} a turn.`, 'bad');
   render();
-  await W(bannerAll('CAUGHT!', `Move undone — ${pname(p)} ${vb(p, 'lose')} a turn`, 'bad'));
+  await W(bannerAll('CAUGHT!', `Move undone — ${pname(p)} ${vb(p, 'lose')} a turn`, 'bad', 2600));
   return 'caught';
 }
 
@@ -989,9 +1001,9 @@ function renderChallenge() {
   const el = $('#challengeBar');
   const ch = S.challenge;
   const p = S.turn;
-  if (!ch || !ch.m || ch.p !== 1 - p || !myMoveInput() || ui.targeting) { el.className = ''; el.innerHTML = ''; return; }
-  const pc = S.board[ch.m.tr] && S.board[ch.m.tr][ch.m.tc];
-  if (!pc) { el.className = ''; el.innerHTML = ''; return; }
+  const open = ch && ch.m && ch.p === 1 - p && myMoveInput() && !ui.targeting;
+  const pc = open && S.board[ch.m.tr] && S.board[ch.m.tr][ch.m.tc];
+  if (!pc) { renderDisputeRecap(el); return; }
   const bv = beliefVerdict(p, pc);
   const sure = hasCard(p, 'sure');
   el.className = 'show ' + bv.cls;
@@ -1002,6 +1014,36 @@ function renderChallenge() {
     <span class="cb-note">Moving or playing a card accepts the move.</span>`;
   $('#cbDispute').onclick = () => humanDispute(false).catch(swallowAbort);
   if (sure) $('#cbSure').onclick = () => humanDispute(true).catch(swallowAbort);
+}
+// What the latest dispute was about and how it ended, shown above the board.
+function disputeText(d) {
+  const piece = `${TYPES[d.type].n} ${glyph(d.type)}`;
+  const mv = `${sqName(d.fr, d.fc)}→${sqName(d.tr, d.tc)}`;
+  const by = `<b class="who ${PL[d.by].cls}">${pname(d.by)}</b>`, mover = `<b class="who ${PL[d.mover].cls}">${nm(d.mover)}</b>`;
+  switch (d.stage) {
+    case 'pending': return { cls: 'gold', html: `⚖ ${by} ${vb(d.by, 'dispute')} ${mover}’s ${piece} ${mv}…` };
+    case 'countered': return { cls: 'cool', html: `⛨ <b>Countered</b> · the dispute of the ${piece} ${mv} is void. Nothing revealed.` };
+    case 'honest': {
+      const cost = d.sure ? 'The Sure Dispute spares the penalty.' : `${pname(d.by)} ${vb(d.by, 'lose')} ${d.deferred ? 'this' : 'a'} turn.`;
+      return { cls: 'good', html: `✔ <b>Honest</b> · the ${piece} on ${sqName(d.tr, d.tc)} really is ${mover}’s. ${cost}` };
+    }
+    case 'caught': return { cls: 'bad', html: `✖ <b>Caught bluffing</b> · ${mover} moved ${nm(d.by)}’s ${piece} ${mv}. Sent back to ${sqName(d.fr, d.fc)}; ${nm(d.mover)} loses a turn.` };
+  }
+  return null;
+}
+function renderDisputeRecap(el) {
+  const t = S.dispute && disputeText(S.dispute);
+  if (!t) { el.className = ''; el.innerHTML = ''; return; }
+  el.className = `show recap ${t.cls}`;
+  el.innerHTML = `<span>${t.html}</span>`;
+}
+// On small screens, make sure the board is on screen before something happens on it.
+function focusBoard() {
+  const b = $('#board');
+  if (!b || !b.offsetParent) return;
+  const r = b.getBoundingClientRect();
+  if (r.top >= 0 && r.bottom <= innerHeight) return;
+  $('#phaseBar').scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 const flashVisible = id => { const w = S.flash.get(id); return w !== undefined && (w === 'all' || w === S.viewer); };
 
@@ -1018,6 +1060,14 @@ function renderBoard() {
     sq.dataset.r = r; sq.dataset.c = c;
     if (lm && ((lm.fr === r && lm.fc === c) || (lm.tr === r && lm.tc === c))) sq.classList.add('last');
     if (ui.sel && ui.sel[0] === r && ui.sel[1] === c) sq.classList.add('sel');
+    const dsp = S.dispute && S.dispute.age === 0 ? S.dispute : null;
+    if (dsp) {
+      // The piece sits on the destination, or back on its origin once caught.
+      const at = dsp.stage === 'caught' ? [dsp.fr, dsp.fc] : [dsp.tr, dsp.tc];
+      const other = dsp.stage === 'caught' ? [dsp.tr, dsp.tc] : [dsp.fr, dsp.fc];
+      if (at[0] === r && at[1] === c) sq.classList.add('disp', 'd-' + dsp.stage);
+      else if (other[0] === r && other[1] === c) sq.classList.add('disp-trail', 'd-' + dsp.stage);
+    }
     if (tset.has(r * 8 + c)) { sq.classList.add('tgt'); if (pc) sq.classList.add('cap'); }
     if (ui.targeting && pc && ui.targeting.filter(pc)) sq.classList.add('pick');
     if (c === 7) sq.insertAdjacentHTML('beforeend', `<span class="coord r">${8 - r}</span>`);
@@ -1061,9 +1111,65 @@ function cardEl(key) {
   return el;
 }
 
+// Shrink a card's rules text until it fits, so small (mobile) cards never clip it.
+function fitCards(root) {
+  for (const t of root.querySelectorAll('.card .c-text')) {
+    t.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(t).fontSize);
+    while (t.scrollHeight > t.clientHeight + 1 && size > 8) { size -= 0.5; t.style.fontSize = size + 'px'; }
+  }
+}
+const touchUI = () => matchMedia('(hover: none), (pointer: coarse)').matches;
+
+// How (or why not) a card in hand can be played right now.
+function cardHint(key, playable) {
+  if (playable) return 'Click to play it.';
+  if (CARDS[key].kind === 'reaction') return key === 'sure' ? 'Use it from the Dispute bar above the board.' : 'Reaction: you will be asked when it can be played.';
+  return S.usedAction ? 'Only one action card per turn.' : 'Play it on your turn, before moving.';
+}
+
+// Mouse: hovering a card shows a large, readable copy next to it.
+function cardTip(target, key, hint) {
+  if (touchUI()) return;
+  const tip = $('#cardTip');
+  tip.replaceChildren();
+  const wrap = document.createElement('div');
+  wrap.className = 'ct-card';
+  wrap.appendChild(cardEl(key));
+  tip.appendChild(wrap);
+  if (hint) { const h = document.createElement('div'); h.className = 'ct-hint'; h.textContent = hint; tip.appendChild(h); }
+  tip.className = 'show';
+  fitCards(tip);
+  // Above the card if it fits, else beside it; always inside the window.
+  const r = target.getBoundingClientRect(), t = tip.getBoundingClientRect();
+  let top = r.top - t.height - 30; // clear of the hover lift
+  let left = r.left + r.width / 2 - t.width / 2;
+  if (top < 8) {
+    top = Math.min(Math.max(8, r.top + r.height / 2 - t.height / 2), innerHeight - t.height - 8);
+    left = innerWidth - r.right >= r.left ? r.right + 12 : r.left - t.width - 12;
+  }
+  tip.style.left = Math.max(8, Math.min(left, innerWidth - t.width - 8)) + 'px';
+  tip.style.top = Math.max(8, top) + 'px';
+}
+function hideCardTip() { const tip = $('#cardTip'); if (tip) { tip.className = ''; tip.replaceChildren(); } }
+function addCardTip(el, key, hint) {
+  el.addEventListener('mouseenter', () => cardTip(el, key, typeof hint === 'function' ? hint() : hint));
+  el.addEventListener('mouseleave', hideCardTip);
+}
+
+// Touch screens: tapping a card opens it full size first, so it can be read before playing.
+async function previewCard(card, playable) {
+  const how = playable ? '' : `<p class="note">${cardHint(card.key, false)}</p>`;
+  const btns = [{ label: 'Close', value: false, cls: 'grey' }];
+  if (playable) btns.push({ label: 'Play card', value: true, cls: 'green' });
+  const go = await modal(`<div class="pv-card">${cardEl(card.key).outerHTML}</div>${how}`, btns, { cls: 'preview' });
+  if (go) humanPlayCard(card.uid).catch(swallowAbort);
+}
+
 function renderHand() {
   const el = $('#hand');
   const v = S.viewer;
+  hideCardTip(); // the hovered card is about to be replaced
   el.replaceChildren();
   if (v < 0) return;
   const hand = S.hands[v];
@@ -1078,12 +1184,24 @@ function renderHand() {
     w.style.setProperty('--rot', `${(i - (n - 1) / 2) * 3}deg`);
     const c = cardEl(card.key);
     const def = CARDS[card.key];
-    if (def.kind === 'reaction') { c.classList.add('reactive'); if (card.key === 'sure') c.classList.add('manual'); c.title = card.key === 'sure' ? 'Use it from the Dispute bar above the board.' : 'Reaction: you will be asked when it can be played.'; }
-    else if (canAct) { c.classList.add('playable'); c.onclick = () => humanPlayCard(card.uid).catch(swallowAbort); c.title = 'Click to play'; }
+    const playable = def.kind === 'action' && canAct;
+    if (def.kind === 'reaction') {
+      c.classList.add('reactive');
+      $('.c-foot', c).textContent = card.key === 'sure' ? 'reaction · dispute bar' : 'reaction · auto';
+      c.title = card.key === 'sure' ? 'Use it from the Dispute bar above the board.' : 'Reaction: you will be asked when it can be played.';
+    }
+    else if (playable) { c.classList.add('playable'); c.title = 'Click to play'; }
     else { c.classList.add('unplayable'); c.title = S.usedAction ? 'Only one action card per turn' : 'Play on your turn, before moving'; }
+    addCardTip(c, card.key, cardHint(card.key, playable));
+    c.onclick = () => {
+      hideCardTip();
+      if (touchUI()) previewCard(card, playable).catch(swallowAbort);
+      else if (playable) humanPlayCard(card.uid).catch(swallowAbort);
+    };
     w.appendChild(c);
     el.appendChild(w);
   });
+  fitCards(el);
 }
 
 function renderPlayers() {
@@ -1189,6 +1307,8 @@ function renderLog() {
 function modal(html, buttons, opts = {}) {
   const ov = $('#overlay');
   ov.innerHTML = `<div class="modal ${opts.cls || ''}">${html}<div class="m-btns"></div></div>`;
+  ov.classList.toggle('sheet', !!opts.sheet);
+  document.body.classList.toggle('sheet-open', !!opts.sheet);
   const bb = $('.m-btns', ov);
   return new Promise(res => {
     const done = v => { closeModal(); res(v); };
@@ -1201,17 +1321,35 @@ function modal(html, buttons, opts = {}) {
     }
     ov.querySelectorAll('[data-val]').forEach(btn => { btn.onclick = () => done(btn.dataset.val); });
     ov.classList.add('show');
+    fitCards(ov);
+    if (opts.sheet) requestAnimationFrame(keepMoveAboveSheet);
   });
 }
-function closeModal() { const ov = $('#overlay'); ov.classList.remove('show'); ov.innerHTML = ''; }
+function closeModal() { const ov = $('#overlay'); ov.classList.remove('show', 'sheet'); document.body.classList.remove('sheet-open'); ov.innerHTML = ''; }
+// Scroll so the squares the prompt is about sit above the bottom sheet, not under it.
+function keepMoveAboveSheet() {
+  const sheet = $('#overlay.sheet .modal');
+  const sqs = [...document.querySelectorAll('#board .sq.last, #board .sq.disp, #board .sq.disp-trail')];
+  if (!sheet || !sqs.length) { focusBoard(); return; }
+  const rs = sqs.map(e => e.getBoundingClientRect());
+  const top = Math.min(...rs.map(r => r.top)), bottom = Math.max(...rs.map(r => r.bottom));
+  const limit = sheet.getBoundingClientRect().top - 10;
+  if (top >= 8 && bottom <= limit) return;
+  const dy = bottom > limit ? Math.min(bottom - limit, top - 8) : top - 8;
+  scrollBy({ top: dy, behavior: 'smooth' });
+}
 
-function banner(big, small, cls = '') {
+// During a dispute the banner moves to the top edge ("peek") so the board stays readable.
+function banner(big, small, cls = '', ms = 1500) {
   const el = $('#banner');
+  ms = Math.min(4000, Math.max(800, +ms || 1500));
+  const peek = !!(S && S.dispute && S.dispute.age === 0 && S.phase !== 'over');
   el.className = '';
   el.innerHTML = `<div class="b-big">${big}</div><div class="b-small">${small || ''}</div>`;
+  el.style.setProperty('--bt', ms + 'ms');
   void el.offsetWidth;
-  el.className = 'show ' + cls;
-  return new Promise(res => { clearTimeout(banner.t); banner.t = setTimeout(() => { el.className = ''; res(); }, 1500); });
+  el.className = 'show ' + cls + (peek ? ' peek' : '');
+  return new Promise(res => { clearTimeout(banner.t); banner.t = setTimeout(() => { el.className = ''; res(); }, ms); });
 }
 
 // Card showcase. 'timed' mode dismisses itself after CARD_SHOW_MS (click/Space skips);
@@ -1243,6 +1381,7 @@ function showCard(p, key, { hold = prefCardHold === 'hold', label = null } = {})
   wrap.append(hint);
   el.append(wrap);
   el.className = 'show';
+  fitCards(el);
   return new Promise(res => {
     let done = false;
     const onKey = e => { if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); finish(); } };
@@ -1294,9 +1433,15 @@ function renderLastCard() {
       <div class="lc-prev">${prev.map((c, i) => `<button data-i="${i + 1}">${PL[c.p].sym} ${CARDS[c.key].name}</button>`).join('')}</div>
     </div></div>`;
   $('.lc-mini', el).appendChild(cardEl(last.key));
+  fitCards(el);
   const open = c => showCard(c.p, c.key, { hold: true, label: `${who(c)} played` });
-  $('.lc-mini', el).onclick = () => open(last);
-  el.querySelectorAll('.lc-prev button').forEach(b => { b.onclick = () => open(list[+b.dataset.i]); });
+  $('.lc-mini', el).onclick = () => { hideCardTip(); open(last); };
+  addCardTip($('.lc-mini', el), last.key, `Played by ${who(last)} · click to enlarge`);
+  el.querySelectorAll('.lc-prev button').forEach(b => {
+    const c = list[+b.dataset.i];
+    b.onclick = () => { hideCardTip(); open(c); };
+    addCardTip(b, c.key, `Played by ${who(c)}`);
+  });
 }
 
 function toast(msg) {
@@ -1352,5 +1497,6 @@ function showRules() {
   const ov = $('#rulesOv');
   ov.innerHTML = `<div class="modal wide">${rulesHTML()}<div class="m-btns"><button class="btn green" id="rulesClose">Got it</button></div></div>`;
   ov.classList.add('show');
+  fitCards(ov);
   $('#rulesClose').onclick = () => { ov.classList.remove('show'); ov.innerHTML = ''; };
 }

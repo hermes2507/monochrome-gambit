@@ -240,8 +240,9 @@ main {
 }
 @keyframes shimmer { from { transform: translateX(-60%); } to { transform: translateX(60%); } }
 .c-name { font-family: Silkscreen, monospace; font-size: 12px; text-align: center; background: var(--rc); color: #fff; border-radius: 5px; padding: 3px 2px; text-shadow: 1px 1px 0 rgba(0,0,0,.4); line-height: 1.1; }
-.c-icon { font-size: 34px; text-align: center; line-height: 1.1; color: var(--rc); text-shadow: 2px 2px 0 rgba(0,0,0,.18); }
-.c-text { font-size: 11.5px; line-height: 1.22; flex: 1; text-align: center; }
+.c-icon { font-size: 34px; text-align: center; line-height: 1.1; color: var(--rc); text-shadow: 2px 2px 0 rgba(0,0,0,.18); flex: none; }
+.c-name, .c-foot { flex: none; }
+.c-text { font-size: 11.5px; line-height: 1.22; flex: 1; min-height: 0; overflow: hidden; text-align: center; }
 .c-foot { font-family: Silkscreen, monospace; font-size: 8.5px; text-align: center; color: #6b6577; text-transform: uppercase; letter-spacing: .5px; }
 .card.k-reaction .c-foot { color: #b03a48; }
 .card.playable { cursor: pointer; }
@@ -249,10 +250,6 @@ main {
 .cw:hover { animation-play-state: paused; z-index: 5; position: relative; }
 .card.unplayable { filter: brightness(.72) saturate(.75); }
 .card.reactive { filter: none; }
-.card.reactive::before {
-  content: "AUTO"; position: absolute; top: 34px; right: -22px; transform: rotate(35deg);
-  background: #b03a48; color: #fff; font-size: 8px; padding: 1px 22px; font-family: Silkscreen, monospace;
-}
 .hand-empty { color: var(--dim); align-self: center; font-size: 14px; }
 
 /* ---------- Overlays ---------- */
@@ -311,7 +308,24 @@ main {
   position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 130;
   pointer-events: none; text-align: center; display: none;
 }
-#banner.show { display: block; animation: bannerIn 1.5s ease-out forwards; }
+#banner.show { display: block; animation: bannerIn var(--bt, 1.5s) ease-out forwards; }
+/* During a dispute: a compact strip at the top, so the board stays visible. */
+#banner.peek {
+  top: 10px; width: max-content; max-width: calc(100vw - 24px);
+  background: rgba(12, 14, 24, .92); border: 3px solid currentColor; border-radius: 12px; padding: 6px 16px 8px;
+  box-shadow: 0 6px 0 rgba(0,0,0,.5);
+}
+#banner.peek.show { animation-name: bannerPeek; }
+#banner.peek .b-big { font-size: clamp(26px, 7vw, 44px); text-shadow: 3px 3px 0 #000; }
+#banner.peek .b-small { font-size: 15px; white-space: normal; }
+#banner.good.peek { color: var(--good); } #banner.bad.peek { color: var(--bad); }
+#banner.gold.peek { color: var(--gold); } #banner.cool.peek { color: var(--luna); }
+@keyframes bannerPeek {
+  0% { transform: translate(-50%, -120%); opacity: 0; }
+  10% { transform: translate(-50%, 0); opacity: 1; }
+  88% { transform: translate(-50%, 0); opacity: 1; }
+  100% { transform: translate(-50%, -30%); opacity: 0; }
+}
 .b-big {
   font-family: Silkscreen, monospace; font-size: clamp(40px, 9vw, 86px); font-weight: 700; letter-spacing: 3px;
   color: #fff; text-shadow: 5px 5px 0 #000, 0 0 30px currentColor; white-space: nowrap;
@@ -335,7 +349,7 @@ main {
 #cardShow {
   position: fixed; inset: 0; z-index: 125; display: none;
   align-items: center; justify-content: center; cursor: pointer;
-  background: rgba(5, 6, 12, .45); backdrop-filter: blur(2px);
+  background: rgba(5, 6, 12, .4);
 }
 #cardShow.show { display: flex; }
 #cardShow .cs-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; animation: csIn .45s cubic-bezier(.2,1.3,.4,1) both; }
@@ -349,7 +363,7 @@ main {
 @keyframes csIn { from { transform: translateY(40px) rotateY(80deg) scale(.8); opacity: 0; } }
 @keyframes csOut { to { transform: translateY(-50px) scale(.9); opacity: 0; } }
 @keyframes csBar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-@media (max-width: 720px) { #cardShow .card { transform: scale(1.25); margin: 40px 20px; } }
+@media (max-width: 720px) { #cardShow .card { transform: scale(1.5); margin: 64px 40px; } }
 
 /* ---------- Cards played panel ---------- */
 #lastCard .lc-body { display: flex; gap: 10px; align-items: flex-start; }
@@ -378,15 +392,6 @@ main {
 #log::-webkit-scrollbar, .modal::-webkit-scrollbar { width: 8px; }
 #log::-webkit-scrollbar-thumb, .modal::-webkit-scrollbar-thumb { background: #39405f; border-radius: 4px; }
 
-@media (max-width: 720px) {
-  h1 { font-size: 18px; }
-  .card { width: 96px; height: 146px; padding: 5px; }
-  .c-name { font-size: 9.5px; }
-  .c-icon { font-size: 24px; }
-  .c-text { font-size: 9.5px; }
-  .cw { margin: 0 -10px; }
-  #handArea { min-height: 160px; }
-}
 
 .gl { font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", "Apple Symbols", serif; font-size: 1.35em; line-height: 1; vertical-align: -0.1em; }
 
@@ -433,4 +438,102 @@ main {
 #challengeBar .cb-hint { font-size: 12.5px; color: var(--dim); }
 #challengeBar .cb-btns { display: inline-flex; gap: 8px; }
 #challengeBar .cb-note { width: 100%; font-size: 11.5px; color: var(--dim); }
-.card.reactive.manual::before { content: "BAR"; background: #b8860b; }
+
+
+/* ---------- Dispute marks on the board ---------- */
+.sq.disp { --dc: var(--gold); box-shadow: inset 0 0 0 4px var(--dc); animation: dispPulse 1s ease-in-out infinite; }
+.sq.disp::before { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--dc) 30%, transparent); }
+.sq.disp::after {
+  content: "⚖"; position: absolute; right: 2%; bottom: 2%; z-index: 12; pointer-events: none;
+  font-size: calc(var(--bs) * 0.03); min-width: 14px; line-height: 1; text-align: center;
+  background: var(--dc); color: #10131d; border-radius: 4px; padding: 1px 2px;
+}
+.sq.disp-trail { --dc: var(--gold); box-shadow: inset 0 0 0 3px var(--dc); }
+.sq.disp-trail::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--dc) 28%, transparent) 0 6px, transparent 6px 12px); }
+.sq.d-honest { --dc: var(--good); } .sq.d-caught { --dc: var(--bad); } .sq.d-countered { --dc: var(--luna); }
+.sq.disp.d-caught::after { content: "✖"; } .sq.disp.d-honest::after { content: "✔"; } .sq.disp.d-countered::after { content: "⛨"; }
+@keyframes dispPulse { 50% { box-shadow: inset 0 0 0 4px var(--dc), inset 0 0 22px var(--dc); } }
+#challengeBar.recap { border-color: var(--gold); background: #1d1a10; }
+#challengeBar.recap.good { border-color: var(--good); background: #10201a; }
+#challengeBar.recap.bad { border-color: var(--bad); background: #24121a; box-shadow: 0 4px 0 rgba(0,0,0,.45), 0 0 18px rgba(255,84,104,.25); }
+#challengeBar.recap.cool { border-color: var(--luna); background: #111a2a; }
+
+/* ---------- Prompts as a bottom sheet (board stays visible) ---------- */
+#overlay.sheet { align-items: flex-end; background: rgba(5, 6, 12, .2); backdrop-filter: none; padding: 8px; pointer-events: none; }
+#overlay.sheet .modal { pointer-events: auto; max-height: 48vh; padding: 14px 16px; animation: sheetIn .22s ease-out; box-shadow: 0 -4px 30px rgba(0,0,0,.6); }
+#overlay.sheet .modal h2 { font-size: 18px; margin-bottom: 6px; }
+#overlay.sheet .modal p { margin: 6px 0; }
+#overlay.sheet .m-btns { margin-top: 10px; }
+body.sheet-open #app { padding-bottom: 50vh; } /* room to scroll the board above the sheet */
+@keyframes sheetIn { from { transform: translateY(40px); opacity: 0; } }
+
+/* ---------- Card preview (touch) ---------- */
+.modal.preview { max-width: 340px; text-align: center; }
+.pv-card { display: flex; justify-content: center; padding: 50px 0 46px; }
+.pv-card .card { transform: scale(1.55); }
+.modal.preview .m-btns { justify-content: center; }
+
+/* ---------- Phones ---------- */
+@media (max-width: 720px) {
+  :root { --bs: clamp(240px, min(calc(100vw - 16px), calc(100svh - 150px)), 620px); }
+  body { font-size: 14px; }
+  #app { padding: 8px 8px 16px; }
+  header { flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  h1 { font-size: 17px; letter-spacing: 1px; }
+  .hdr-btns { flex-wrap: wrap; gap: 6px; width: 100%; }
+  .hdr-btns .btn { flex: 1 1 0; font-size: 10px; padding: 7px 4px; white-space: nowrap; }
+
+  /* Rival and you side by side on top, board next, everything else below. */
+  main { grid-template-columns: 1fr 1fr; gap: 8px; }
+  #left, #right { display: contents; }
+  #pbox1 { order: 1; } #pbox0 { order: 2; }
+  #center { order: 3; grid-column: 1 / -1; gap: 8px; }
+  #effects { order: 4; grid-column: 1 / -1; }
+  #right > * { order: 5; grid-column: 1 / -1; }
+  .panel, .pbox { padding: 7px 9px; border-width: 2px; }
+  .pbox { min-width: 0; }
+  .pb-head { font-size: 13px; gap: 5px; }
+  .pb-sym { font-size: 16px; }
+  .pb-tag { font-size: 9px; }
+  .pb-row { font-size: 11px; margin-top: 3px; gap: 4px; }
+  .mini-back { width: 9px; height: 13px; }
+  .lost { font-size: 14px; }
+  #phaseBar { font-size: 12.5px; min-height: 32px; padding: 4px 8px; gap: 6px; border-width: 2px; }
+  #challengeBar.show { font-size: 13px; padding: 6px 8px; border-width: 2px; }
+  #board { border-width: 4px; }
+
+  /* Hand: a swipeable row of readable cards instead of an overlapping fan. */
+  #handArea { min-height: 0; padding-top: 2px; }
+  #hand { width: 100%; justify-content: flex-start; overflow-x: auto; padding: 4px 2px 10px; gap: 6px; scroll-snap-type: x proximity; }
+  #hand > .cw:first-child { margin-left: auto; }
+  #hand > .cw:last-child { margin-right: auto; }
+  .cw { animation: none; margin: 0; transform: none; scroll-snap-align: center; flex: none; }
+  .card { width: 112px; height: 166px; padding: 5px 5px 4px; gap: 3px; border-width: 3px; }
+  .card.playable:hover { transform: none; }
+  .card.playable { box-shadow: 0 5px 0 rgba(0,0,0,.55), 0 0 12px var(--rc); }
+  .c-name { font-size: 10px; padding: 3px 2px; }
+  .c-icon { font-size: 22px; }
+  .c-text { font-size: 11px; line-height: 1.2; }
+  .c-foot { font-size: 7.5px; }
+
+  .modal { padding: 16px; }
+  #overlay.sheet .m-btns .btn { flex: 1 1 auto; padding: 9px 10px; }
+  #overlay.sheet .modal { padding: 12px 14px; max-height: 46vh; }
+  #overlay.sheet .modal h2 { font-size: 16px; }
+  #overlay.sheet .modal p, #overlay.sheet .verdict { font-size: 13px; }
+  #overlay.sheet .modal .note { font-size: 12px; }
+  #log { max-height: 240px; }
+  .b-small { font-size: 16px; }
+}
+body.sheet-open .sq.last { box-shadow: inset 0 0 0 4px var(--gold); animation: dispPulse 1s ease-in-out infinite; --dc: var(--gold); }
+
+/* ---------- Hover card tooltip (mouse only) ---------- */
+#cardTip { position: fixed; z-index: 135; display: none; pointer-events: none; flex-direction: column; align-items: center; gap: 8px; }
+#cardTip.show { display: flex; animation: tipIn .14s ease-out; }
+#cardTip .ct-card { zoom: 1.65; }
+#cardTip .card { box-shadow: 0 6px 0 rgba(0,0,0,.6), 0 0 30px var(--rc); }
+#cardTip .ct-hint {
+  max-width: 230px; font-size: 13px; text-align: center; color: var(--ink);
+  background: #171b2c; border: 2px solid var(--panel-edge); border-radius: 8px; padding: 5px 9px;
+}
+@keyframes tipIn { from { opacity: 0; transform: translateY(6px); } }

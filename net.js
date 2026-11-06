@@ -11,7 +11,7 @@
      part of the host's peer id. Game data then flows browser-to-browser.
    ===================================================================== */
 
-const PROTO = 2;
+const PROTO = 3;
 const PEER_PREFIX = 'monochrome-gambit-v1-';
 const CODE_ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
 const CODE_LEN = 5;
@@ -110,6 +110,7 @@ function viewFor(v) {
     freeDisputes: S.freeDisputes,
     cardLog: S.cardLog || [],
     challenge: S.challenge ? { p: S.challenge.p, id: S.challenge.id, m: S.challenge.m } : null,
+    dispute: S.dispute, // public: who disputed which move, and the outcome
     board: S.board.map(row => row.map(pc => pc ? hide(pc) : null)),
     captured: S.captured.map(hide),
     deckN: S.deck.length, discard: S.discard,
@@ -371,7 +372,7 @@ function applyView(raw) {
 
 function guestFx(d) {
   const a = Array.isArray(d.a) ? d.a : [];
-  if (d.k === 'banner') banner(cleanHTML(a[0]), cleanHTML(a[1]), FX_CLS.has(a[2]) ? a[2] : '');
+  if (d.k === 'banner') banner(cleanHTML(a[0]), cleanHTML(a[1]), FX_CLS.has(a[2]) ? a[2] : '', typeof a[3] === 'number' ? a[3] : 1500);
   else if (d.k === 'card' && (a[0] === 0 || a[0] === 1) && CARDS[a[1]]) showCard(a[0], a[1]);
   else if (d.k === 'gameover') modal(cleanHTML(a[0]), [{ label: 'Close', value: 'ok', cls: 'green' }]);
 }
@@ -383,7 +384,7 @@ function guestAsk(d) {
     cls: BTN_CLS.has(b && b.cls) ? b.cls : '',
   }));
   if (!buttons.length) return;
-  modal(cleanHTML(d.html), buttons).then(value => NET.send({ t: 'answer', id: d.id, value }));
+  modal(cleanHTML(d.html), buttons, { sheet: true }).then(value => NET.send({ t: 'answer', id: d.id, value }));
 }
 
 function guestLost() {
@@ -425,6 +426,12 @@ function cleanView(s) {
     cardLog: arr(s.cardLog, 5).filter(c => c && P(c.p) !== null && CARDS[c.key]).map(c => ({ p: c.p, key: c.key })),
     challenge: s.challenge && P(s.challenge.p) !== null && move(s.challenge.m)
       ? { p: s.challenge.p, id: int(s.challenge.id), m: move(s.challenge.m) } : null,
+    dispute: (() => {
+      const d = s.dispute, m = move(d);
+      if (!d || !m || P(d.by) === null || P(d.mover) === null || !TYPES[d.type]) return null;
+      if (!['pending', 'countered', 'honest', 'caught'].includes(d.stage)) return null;
+      return { ...m, by: d.by, mover: d.mover, type: d.type, stage: d.stage, sure: !!d.sure, deferred: !!d.deferred, age: int(d.age) > 0 ? 1 : 0 };
+    })(),
     back: /^[KQRBN]{8}$/.test(s.back) ? s.back : STANDARD_BACK,
     names: [0, 1].map(p => cleanName(s.names && s.names[p]) || PL[p].name),
     board: Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => piece(s.board && s.board[r] && s.board[r][c]))),
