@@ -399,3 +399,18 @@ main {
 .about a, .modal a { color: var(--luna); }
 @media (max-width: 420px) { .menu-row { grid-template-columns: 1fr; } }
 .setup-note { margin: 6px 2px 0; }
+
+/* ---------- Free-dispute bar ---------- */
+#challengeBar { display: none; }
+#challengeBar.show {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 12px;
+  width: var(--bs); max-width: 100%; padding: 8px 12px; font-size: 14px; text-align: center;
+  background: #1d1a10; border: 3px solid var(--gold); border-radius: 10px;
+  box-shadow: 0 4px 0 rgba(0,0,0,.45), 0 0 18px rgba(242,181,58,.25); animation: pop .2s ease-out;
+}
+#challengeBar.good { border-color: var(--good); background: #10201a; }
+#challengeBar.bad { border-color: #5a6080; background: #161a2a; box-shadow: 0 4px 0 rgba(0,0,0,.45); }
+#challengeBar .cb-hint { font-size: 12.5px; color: var(--dim); }
+#challengeBar .cb-btns { display: inline-flex; gap: 8px; }
+#challengeBar .cb-note { width: 100%; font-size: 11.5px; color: var(--dim); }
+.card.reactive.manual::before { content: "BAR"; background: #b8860b; }

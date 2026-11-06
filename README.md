@@ -21,6 +21,7 @@ A shared 40-card deck, presented with a nod to Balatro, adds Counter-disputes, A
 | **Online** | One player hosts and gets a 5-letter code (and an invite link); the friend types it in. |
 | **Chess960** | Optional for every mode: the back rank is shuffled each game. |
 | **Randomise ownership** | On by default. Untick it for classic sides (you own the bottom 16 pieces, your rival the top 16). Pieces still look identical and carry no badges, so it becomes a memory challenge. The AI starts knowing every piece but forgets a few each turn. |
+| **Free disputes** | Dispute any move without a card, from a **Dispute bar** at the start of your turn; a wrong dispute costs you that turn. On automatically with classic ownership, optional with random ownership. Dispute cards become **Sure Disputes** (no penalty if wrong). |
 
 ## Rules in brief
 
@@ -28,6 +29,7 @@ A shared 40-card deck, presented with a nod to Balatro, adds Counter-disputes, A
 2. Any piece may capture any piece. There is no check, castling or en passant. Pawns promote to queens.
 3. Both kings are public, and only a king's owner may move it.
 4. A piece's owner is revealed to everyone when it is captured or disputed.
+   In the default card mode you need a **Dispute** card to challenge a move. With **Free disputes**, anyone may challenge, and the turn you risk is what keeps disputes honest.
 5. Each non-king piece also wears a public **colour** (red, white or plain). Colour is unrelated to ownership. It's what Frost, Purge, Shuffle and Paintbrush act on.
 6. The default back rank, the **Monochrome setup**, is `R B Q N K N B R`. It isn't the classic `R N B Q K B N R` on purpose: since any piece can capture any piece, a queen beside the king could capture it on move one, so knights guard the kings instead. The Chess960 option only deals positions without a queen or rook next to the king (172 of the 960).
 

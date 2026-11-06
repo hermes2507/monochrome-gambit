@@ -11,7 +11,7 @@
      part of the host's peer id. Game data then flows browser-to-browser.
    ===================================================================== */
 
-const PROTO = 1;
+const PROTO = 2;
 const PEER_PREFIX = 'monochrome-gambit-v1-';
 const CODE_ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
 const CODE_LEN = 5;
@@ -107,6 +107,8 @@ function viewFor(v) {
   });
   return {
     gid: S.gid, variant: S.variant, back: S.back, names: S.names, ownership: S.ownership,
+    freeDisputes: S.freeDisputes,
+    challenge: S.challenge ? { p: S.challenge.p, id: S.challenge.id, m: S.challenge.m } : null,
     board: S.board.map(row => row.map(pc => pc ? hide(pc) : null)),
     captured: S.captured.map(hide),
     deckN: S.deck.length, discard: S.discard,
@@ -193,7 +195,7 @@ function hostOnData(conn, d) {
       NET.started = true;
       const guest = cleanName(d.name) || PL[1].name;
       toast(`${guest} joined!`);
-      newGame('online', prefVariant, [NET.myName || PL[0].name, guest], prefOwnership);
+      newGame('online', prefVariant, [NET.myName || PL[0].name, guest], prefOwnership, effectiveFree(prefOwnership));
     } else {
       toast(`${nm(1)} is back!`);
       NET.flush(true);
@@ -220,6 +222,7 @@ function hostOnData(conn, d) {
       return;
     }
     case 'card': hostHandleCard(d, reject).catch(swallowAbort); return;
+    case 'dispute': hostHandleDispute(d, reject).catch(swallowAbort); return;
     case 'answer': {
       const pa = NET.pendingAsk;
       if (!pa || pa.id !== d.id || !pa.buttons.some(b => b.value === d.value)) return;
@@ -254,6 +257,23 @@ async function hostHandleCard(d, reject) {
   try { await playCard(1, card.uid, opts); }
   finally { NET.cardBusy = false; }
   if (S.gid === gid && NET.resolveRemoteMove && S.phase === 'move') { S.awaiting = 1; render(); }
+}
+
+// Free disputes: the guest disputes the host's last move during the guest's turn.
+async function hostHandleDispute(d, reject) {
+  if (S.awaiting !== 1 || !NET.resolveRemoteMove || NET.cardBusy) return reject('You can’t dispute right now.');
+  if (!S.freeDisputes || !S.challenge || S.challenge.p !== 0) return reject('There is no move to dispute.');
+  const sure = !!d.sure;
+  if (sure && !hasCard(1, 'sure')) return reject('You have no Sure Dispute.');
+  const gid = S.gid;
+  NET.cardBusy = true;
+  S.awaiting = null;
+  let res;
+  try { res = await runDeferredDispute(1, sure); }
+  finally { NET.cardBusy = false; }
+  if (S.gid !== gid || !NET.resolveRemoteMove) return;
+  if (res === 'forfeit') NET.resolveRemoteMove('forfeit');
+  else if (S.phase === 'move') { S.awaiting = 1; render(); }
 }
 
 /* -------------------------------- Joining ------------------------------- */
@@ -400,6 +420,9 @@ function cleanView(s) {
     gid: String(s.gid || '').slice(0, 24),
     variant: s.variant === '960' ? '960' : 'standard',
     ownership: s.ownership === 'classic' ? 'classic' : 'random',
+    freeDisputes: !!s.freeDisputes,
+    challenge: s.challenge && P(s.challenge.p) !== null && move(s.challenge.m)
+      ? { p: s.challenge.p, id: int(s.challenge.id), m: move(s.challenge.m) } : null,
     back: /^[KQRBN]{8}$/.test(s.back) ? s.back : STANDARD_BACK,
     names: [0, 1].map(p => cleanName(s.names && s.names[p]) || PL[p].name),
     board: Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => piece(s.board && s.board[r] && s.board[r][c]))),
@@ -440,6 +463,9 @@ async function startScreen() {
     <label class="opt"><input type="checkbox" id="optRandOwn" ${prefOwnership === 'random' ? 'checked' : ''}>
       <span><b>Randomise ownership</b> — deal the owner of every piece at random</span></label>
     <p class="note setup-note">Unticked, ownership is like regular chess: you own the bottom 16 pieces and your rival the top 16. They still look identical and carry no badges, so you must <b>remember</b> which are yours.</p>
+    <label class="opt"><input type="checkbox" id="optFree" ${effectiveFree(prefOwnership) ? 'checked' : ''}>
+      <span><b>Free disputes</b> — dispute any move without a card (a wrong dispute costs a turn)</span></label>
+    <p class="note setup-note" id="freeNote">${prefFree ? 'Your own choice.' : 'Follows ownership: on for classic sides, off for random.'} Dispute cards become <b>Sure Disputes</b>, which remove the risk.</p>
     <div class="menu-sec">On this device</div>
     <div class="menu-row">
       <button class="btn gold" data-val="ai">Play vs AI</button>
@@ -458,6 +484,12 @@ async function startScreen() {
   $('#optRandOwn').onchange = e => {
     prefOwnership = e.target.checked ? 'random' : 'classic';
     try { localStorage.setItem('mg-ownership', prefOwnership); } catch (err) { /* storage unavailable */ }
+    if (!prefFree) $('#optFree').checked = effectiveFree(prefOwnership); // still following ownership
+  };
+  $('#optFree').onchange = e => {
+    prefFree = e.target.checked ? 'on' : 'off';
+    try { localStorage.setItem('mg-freedisp', prefFree); } catch (err) { /* storage unavailable */ }
+    $('#freeNote').innerHTML = 'Your own choice. Dispute cards become <b>Sure Disputes</b>, which remove the risk.';
   };
   $('#optName').oninput = e => { NET.myName = cleanName(e.target.value); saveName(NET.myName); };
   const choice = await pending;
@@ -465,7 +497,7 @@ async function startScreen() {
   switch (choice) {
     case 'rules': showRules(); return startScreen();
     case 'about': showAbout(); return startScreen();
-    case 'ai': case 'hotseat': NET.leave(); return newGame(choice, prefVariant, null, prefOwnership);
+    case 'ai': case 'hotseat': NET.leave(); return newGame(choice, prefVariant, null, prefOwnership, effectiveFree(prefOwnership));
     case 'host': return hostFlow();
     case 'join': return joinFlow();
   }

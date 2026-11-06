@@ -30,6 +30,8 @@ const PL = [
   { name: 'Luna', sym: '☾', cls: 'luna' },
 ];
 const RULES = { HAND_MAX: 6, START_HAND: 3, KNOWN_START: 8, SHUFFLE_N: 5 };
+// Free disputes: how many turns a wrong (honest-move) dispute costs. Tune here.
+const WRONG_DISPUTE_TURNS = 1;
 const GLAZES = ['red', 'white', null];
 const gName = g => g === 'red' ? 'Red' : g === 'white' ? 'White' : 'Plain';
 
@@ -37,6 +39,8 @@ const gName = g => g === 'red' ? 'Red' : g === 'white' ? 'White' : 'Plain';
 const CARDS = {
   dispute: { name: 'Dispute', kind: 'reaction', rarity: 'common', count: 12, icon: '⚖',
     text: "After your rival moves, claim the piece wasn't theirs. Right: move undone, they lose a turn. Wrong: you lose a turn." },
+  sure: { name: 'Sure Dispute', kind: 'reaction', rarity: 'uncommon', count: 0, icon: '⚖',
+    text: 'Free-dispute games: dispute with no risk. If the move was honest, you lose no turn.' },
   counter: { name: 'Counter-dispute', kind: 'reaction', rarity: 'uncommon', count: 5, icon: '⛨',
     text: 'When your move is disputed: cancel the dispute. Nothing is revealed.' },
   shuffle: { name: 'Chromatic Shuffle', kind: 'action', rarity: 'common', count: 4, icon: '✺',
@@ -62,6 +66,15 @@ const CARDS = {
   purgeWhite: { name: 'White Purge', kind: 'action', rarity: 'legendary', count: 1, icon: '☠',
     text: 'All white pieces are removed from the game. Kings are immune.' },
 };
+
+// Deck make-up (40 cards). With free disputes, Dispute cards aren't needed, so
+// the slots go to Sure Disputes (insurance) and to cards that support bluffing.
+function deckCounts(free) {
+  const c = {};
+  for (const k in CARDS) c[k] = CARDS[k].count;
+  if (free) Object.assign(c, { dispute: 0, sure: 6, counter: 7, alibi: 5, spyglass: 4, shuffle: 5 });
+  return c;
+}
 
 /* ------------------------------ Game state ------------------------------ */
 // S is the full game state on the host / local device. On an online guest it
@@ -123,8 +136,14 @@ try { if (localStorage.getItem('mg-ownership') === 'classic') prefOwnership = 'c
 // Classic ownership is a memory challenge: humans get no badges for unrevealed pieces.
 // The AI starts with perfect knowledge, so it forgets a little each turn to stay bluffable.
 const AI_FORGET = 0.03;
+const AI_FORGET_FREE = 0.06; // free disputes punish every slip, so the AI forgets faster
 
-function newGame(mode, variant = prefVariant, names = null, ownership = prefOwnership) {
+// Free disputes: null = follow ownership (on for classic), otherwise 'on' / 'off'.
+let prefFree = null;
+try { const f = localStorage.getItem('mg-freedisp'); if (f === 'on' || f === 'off') prefFree = f; } catch (e) { /* storage unavailable */ }
+const effectiveFree = ownership => prefFree ? prefFree === 'on' : ownership === 'classic';
+
+function newGame(mode, variant = prefVariant, names = null, ownership = prefOwnership, freeDisputes = effectiveFree(ownership)) {
   TOKEN++;
   closeModal(); hideHandoff();
   ui.sel = null; ui.targets = []; ui.resolveMove = null; ui.targeting = null; ui.busy = false; ui.sentMove = false;
@@ -165,11 +184,12 @@ function newGame(mode, variant = prefVariant, names = null, ownership = prefOwne
   }
 
   const deck = [];
-  for (const k in CARDS) for (let i = 0; i < CARDS[k].count; i++) deck.push(k);
+  const counts = deckCounts(freeDisputes);
+  for (const k in counts) for (let i = 0; i < counts[k]; i++) deck.push(k);
   shuffle(deck);
 
   S = {
-    mode, variant, back, names, ownership, gid: Math.random().toString(36).slice(2), gen: TOKEN,
+    mode, variant, back, names, ownership, freeDisputes, gid: Math.random().toString(36).slice(2), gen: TOKEN,
     board: B, captured: [], deck, discard: [], hands: [[], []],
     skips: [0, 0], frost: { red: 0, white: 0 },
     turn: rnd(2), turnCount: 1,
@@ -178,11 +198,15 @@ function newGame(mode, variant = prefVariant, names = null, ownership = prefOwne
     phase: 'start', winner: null, showAll: false, uid: 1, anim: null,
     flash: new Map(), // piece id -> 'all' | player who may see the flash
     awaiting: null,   // player whose move input the engine is waiting on (online)
+    challenge: null,  // free disputes: the rival's last move, open to dispute this turn
   };
   for (const p of [0, 1]) {
-    const i = S.deck.indexOf('dispute');
-    S.hands[p].push({ key: S.deck.splice(i, 1)[0], uid: S.uid++ });
-    drawCards(p, RULES.START_HAND - 1);
+    // Card mode: everyone starts with one Dispute. Free disputes need no card.
+    if (!freeDisputes) {
+      const i = S.deck.indexOf('dispute');
+      S.hands[p].push({ key: S.deck.splice(i, 1)[0], uid: S.uid++ });
+    }
+    drawCards(p, RULES.START_HAND - S.hands[p].length);
   }
   render();
   gameLoop();
@@ -249,7 +273,7 @@ async function playCard(p, uid, opts = {}) {
   if (i < 0) return;
   const card = hand.splice(i, 1)[0];
   S.discard.push(card.key);
-  if (CARDS[card.key].kind === 'action') S.usedAction = true;
+  if (CARDS[card.key].kind === 'action') { S.usedAction = true; S.challenge = null; } // acting accepts the rival's move
   ui.sel = null; ui.targets = [];
   render();
   await W(showCardAll(p, card.key));
@@ -427,6 +451,7 @@ async function playTurn() {
   const p = S.turn;
   S.usedAction = false; S.alibi = false; S.extraMove = false;
   ui.sel = null; ui.targets = [];
+  if (S.challenge && S.challenge.p === p) S.challenge = null; // the window has passed
 
   if (S.skips[p] > 0) {
     S.skips[p]--;
@@ -449,6 +474,7 @@ async function playTurn() {
     const m = isAI(p) ? await aiMovePhase(p)
       : isRemote(p) ? await W(remoteMovePhase(p))
       : await W(humanMovePhase(p));
+    if (m === 'forfeit') { S.challenge = null; return; } // wrong free dispute: turn over
     if (!m) { log(`${pname(p)} cannot move and ${vb(p, 'pass')}.`, 'dim'); break; }
     const res = await executeMove(p, m);
     if (S.winner || res === 'caught') return;
@@ -458,8 +484,9 @@ async function playTurn() {
 
 function humanMovePhase() {
   S.phase = 'move';
-  render();
-  return new Promise(res => { ui.resolveMove = res; });
+  const p = new Promise(res => { ui.resolveMove = res; });
+  render(); // after resolveMove is set, so the bars know the player may act
+  return p;
 }
 
 // Online: wait for the guest's move. net.js validates it and calls the resolver.
@@ -474,6 +501,7 @@ function remoteMovePhase(p) {
 
 async function executeMove(p, m) {
   S.phase = 'resolving';
+  S.challenge = null; // moving accepts the rival's last move
   const snap = JSON.parse(JSON.stringify({ board: S.board, captured: S.captured }));
   const pc = S.board[m.fr][m.fc];
   const cap = S.board[m.tr][m.tc];
@@ -495,19 +523,48 @@ async function executeMove(p, m) {
   return res;
 }
 
+// After p moves, give the rival o the chance to dispute.
+//  - Card mode: o needs a Dispute card, and is asked right away.
+//  - Free disputes: anyone may dispute, risking a turn. A human rival normally
+//    disputes from the Dispute bar at the start of their own turn (S.challenge);
+//    the game asks immediately only when waiting is impossible (king captured,
+//    Double Time, or o is about to lose their turn anyway).
 async function reactionWindow(p, pc, info) {
   const o = 1 - p;
   if (S.alibi) { log('Alibi: this move cannot be disputed.', 'dim'); return 'ok'; }
-  if (!hasCard(o, 'dispute')) return 'ok';
-
   const kingCap = !!(info.cap && info.cap.type === 'K');
+
+  if (S.freeDisputes) {
+    if (isAI(o)) {
+      await wait(450);
+      const want = aiWantsDispute(o, pc, info, kingCap);
+      return want ? resolveDispute(p, pc, info, { sure: want === 'sure' }) : 'ok';
+    }
+    if (!kingCap && !S.extraMove && !S.skips[o]) {
+      S.challenge = { p, id: pc.id, m: info.m, info };
+      return 'ok';
+    }
+    await handoff(o);
+    const ans = await W(askDisputeFree(o, pc, info));
+    return ans ? resolveDispute(p, pc, info, { sure: ans === 'sure' }) : 'ok';
+  }
+
+  if (!hasCard(o, 'dispute')) return 'ok';
   let want;
   if (isAI(o)) { await wait(450); want = aiWantsDispute(o, pc, info, kingCap); }
   else { await handoff(o); want = await W(askDispute(o, pc, info)); }
-  if (!want) return 'ok';
+  return want ? resolveDispute(p, pc, info, { card: 'dispute' }) : 'ok';
+}
 
-  await useCard(o, 'dispute');
-  log(`${pname(o)} ${vb(o, 'dispute')} the move!`, 'hot');
+// Resolve o's dispute of p's move. Returns 'caught' | 'honest' | 'ok' (countered).
+// deferred: the dispute was raised at the start of o's own turn, so an honest
+// result costs o this turn (the caller ends it) instead of their next one.
+async function resolveDispute(p, pc, info, { card = null, sure = false, deferred = false } = {}) {
+  const o = 1 - p;
+  if (sure) await useCard(o, 'sure');
+  else if (card) await useCard(o, card);
+  else await W(bannerAll('DISPUTE!', `${pname(o)} ${vb(o, 'challenge')} the move`, 'gold'));
+  log(`${pname(o)} ${vb(o, 'dispute')} the move${sure ? ' with a Sure Dispute' : ''}!`, 'hot');
 
   if (hasCard(p, 'counter')) {
     let c;
@@ -524,11 +581,21 @@ async function reactionWindow(p, pc, info) {
   const owner = pc.owner;
   if (owner === p) {
     reveal(pc);
-    S.skips[o]++;
-    log(`Honest move — that piece belongs to ${nm(owner)}. ${pname(o)} ${vb(o, 'lose')} a turn.`, 'good');
+    let sub;
+    if (sure) {
+      sub = 'Sure Dispute: no turn lost';
+      log(`Honest move — that piece belongs to ${nm(owner)}. The Sure Dispute spares ${pname(o)} the penalty.`, 'good');
+    } else if (deferred) {
+      sub = `${pname(o)} ${vb(o, 'lose')} this turn`;
+      log(`Honest move — that piece belongs to ${nm(owner)}. ${pname(o)} ${vb(o, 'lose')} this turn.`, 'good');
+    } else {
+      S.skips[o] += WRONG_DISPUTE_TURNS;
+      sub = `${pname(o)} ${vb(o, 'lose')} a turn`;
+      log(`Honest move — that piece belongs to ${nm(owner)}. ${pname(o)} ${vb(o, 'lose')} a turn.`, 'good');
+    }
     render();
-    await W(bannerAll('HONEST!', `${pname(o)} ${vb(o, 'lose')} a turn`, 'good'));
-    return 'ok';
+    await W(bannerAll('HONEST!', sub, 'good'));
+    return 'honest';
   }
   // Caught bluffing: undo the move, reveal the piece, mover loses a turn.
   const id = pc.id;
@@ -541,6 +608,24 @@ async function reactionWindow(p, pc, info) {
   render();
   await W(bannerAll('CAUGHT!', `Move undone — ${pname(p)} ${vb(p, 'lose')} a turn`, 'bad'));
   return 'caught';
+}
+
+// Free disputes: o disputes the rival's last move from the Dispute bar during o's turn.
+// Returns 'forfeit' when the dispute was wrong and o's turn is over.
+async function runDeferredDispute(o, sure) {
+  const ch = S.challenge;
+  S.challenge = null;
+  const pc = ch && findPiece(ch.id);
+  if (!pc || ch.p !== 1 - o) return 'ok';
+  const res = await resolveDispute(ch.p, pc, ch.info, { sure, deferred: true });
+  await handoff(o); // hotseat: back to the disputer after a counter-dispute prompt
+  render();
+  if (res === 'honest' && !sure) {
+    // A wrong dispute costs WRONG_DISPUTE_TURNS turns: this one, plus any extra.
+    if (WRONG_DISPUTE_TURNS > 1) S.skips[o] += WRONG_DISPUTE_TURNS - 1;
+    return 'forfeit';
+  }
+  return 'ok';
 }
 
 function checkWin() {
@@ -560,11 +645,11 @@ async function endGame() {
   if (S.mode === 'online') {
     NET.sendNow({ t: 'fx', k: 'gameover', a: [html + '<p class="note">The host can start a rematch.</p>'] });
     const again = await W(modal(html, [{ label: 'Look at board', value: 'look', cls: 'grey' }, { label: 'Rematch', value: 'again', cls: 'green' }]));
-    if (again === 'again') newGame('online', S.variant, S.names, S.ownership);
+    if (again === 'again') newGame('online', S.variant, S.names, S.ownership, S.freeDisputes);
     return;
   }
   const again = await W(modal(html, [{ label: 'Look at board', value: 'look', cls: 'grey' }, { label: 'Play again', value: 'again', cls: 'green' }]));
-  if (again === 'again') newGame(S.mode, S.variant, null, S.ownership);
+  if (again === 'again') newGame(S.mode, S.variant, null, S.ownership, S.freeDisputes);
 }
 
 /* ------------------------------- Hotseat -------------------------------- */
@@ -603,6 +688,21 @@ function askDispute(o, pc, info) {
      <div class="verdict ${bv.cls}">${bv.txt} ${hint}</div>
      <p class="note">If the piece isn’t ${nm(p)}’s, the move is undone and they lose a turn. If it is, <b>you</b> lose a turn. You hold ${n} Dispute card(s).</p>`,
     [{ label: 'Let it go', value: false, cls: 'grey' }, { label: '⚖ Dispute!', value: true }]);
+}
+
+// Free disputes, asked right away (king captured, Double Time, or about to lose a turn).
+function askDisputeFree(o, pc, info) {
+  const p = 1 - o, m = info.m;
+  const bv = beliefVerdict(o, pc);
+  const kingCap = info.cap && info.cap.type === 'K';
+  const btns = [{ label: 'Let it go', value: false, cls: 'grey' }, { label: '⚖ Dispute', value: 'free' }];
+  if (hasCard(o, 'sure')) btns.push({ label: '⚖ Sure Dispute (card)', value: 'sure', cls: 'gold' });
+  return promptPlayer(o,
+    `<h2>${kingCap ? 'Your king is under attack!' : 'Dispute?'}</h2>
+     <p><b class="who ${PL[p].cls}">${PL[p].sym} ${nm(p)}</b> moved the ${TYPES[pc.type].n} ${glyph(pc.type)} from <b>${sqName(m.fr, m.fc)}</b> to <b>${sqName(m.tr, m.tc)}</b>${info.cap ? `, capturing ${kingCap ? 'your king' : 'a ' + TYPES[info.cap.type].n}` : ''}.</p>
+     <div class="verdict ${bv.cls}">${bv.txt}</div>
+     <p class="note">Disputes are free. If the piece isn’t ${nm(p)}’s, the move is undone and they lose a turn. If it is, <b>you</b> lose ${WRONG_DISPUTE_TURNS === 1 ? 'a turn' : WRONG_DISPUTE_TURNS + ' turns'}${hasCard(o, 'sure') ? ', unless you use a Sure Dispute' : ''}.${kingCap ? ' If you let it stand, you lose the game.' : ''}</p>`,
+    btns);
 }
 
 function askCounter(p, pc) {
@@ -676,6 +776,22 @@ async function humanPlayCard(uid) {
   }
 }
 
+// Free disputes: dispute the rival's last move from the Dispute bar.
+async function humanDispute(sure) {
+  if (ui.busy || ui.targeting || !myMoveInput() || !S.challenge || S.challenge.p !== 1 - S.turn) return;
+  if (sure && !hasCard(S.turn, 'sure')) return;
+  ui.busy = true;
+  ui.sel = null; ui.targets = [];
+  try {
+    if (S.isView) { ui.sentMove = true; NET.send({ t: 'dispute', sure }); return; }
+    const res = await runDeferredDispute(S.turn, sure);
+    if (res === 'forfeit' && ui.resolveMove) { const r = ui.resolveMove; ui.resolveMove = null; r('forfeit'); }
+  } finally {
+    ui.busy = false;
+    render();
+  }
+}
+
 async function onSquareClick(r, c) {
   const pc = S.board[r][c];
   if (ui.targeting) {
@@ -741,7 +857,7 @@ async function aiMovePhase(p) {
 
 function aiBestMove(p, moves) {
   const o = 1 - p, pm = pMine(p);
-  const oppDisp = S.hands[o].length >= 2 ? 0.75 : 0.45;
+  const oppDisp = S.freeDisputes ? 0.65 : S.hands[o].length >= 2 ? 0.75 : 0.45;
   const alibi = S.alibi || (!S.usedAction && hasCard(p, 'alibi'));
   let best = null;
   for (const m of moves) {
@@ -820,7 +936,9 @@ function aiChooseAction(p) {
   return best && best.u >= 1 ? best : null;
 }
 
+// Card mode returns true/false. Free disputes return false | 'free' | 'sure'.
 function aiWantsDispute(o, pc, info, kingCap) {
+  if (S.freeDisputes) return aiFreeDispute(o, pc, info, kingCap);
   if (kingCap) return true; // nothing to lose
   const b = pc.belief[o];
   if (b === o) return true;
@@ -836,8 +954,21 @@ function aiWantsDispute(o, pc, info, kingCap) {
 function aiForget(p) {
   for (const pc of onBoard()) {
     if (pc.revealed || pc.type === 'K' || pc.belief[p] === null) continue;
-    if (Math.random() < AI_FORGET) pc.belief[p] = null;
+    if (Math.random() < (S.freeDisputes ? AI_FORGET_FREE : AI_FORGET)) pc.belief[p] = null;
   }
+}
+
+function aiFreeDispute(o, pc, info, kingCap) {
+  const sure = hasCard(o, 'sure');
+  const b = pc.belief[o];
+  if (b === o) return 'free';             // certain: no need to spend a card
+  if (kingCap) return sure ? 'sure' : 'free'; // losing anyway: always challenge
+  if (b === 1 - o) return false;
+  const pm = pMine(o) * 0.75;
+  const capVal = info.cap ? Math.max(0, valueTo(o, info.cap, pm)) : 0;
+  if (sure && pm > 0.25 && capVal >= 3) return 'sure';
+  const ev = pm * (3 + capVal) - (1 - pm) * 3 * WRONG_DISPUTE_TURNS;
+  return ev > 0.5 ? 'free' : false;
 }
 
 function aiWantsCounter(p, pc) {
@@ -848,7 +979,27 @@ function aiWantsCounter(p, pc) {
 function render() {
   if (!S) return;
   if (NET.role === 'host' && S.mode === 'online') NET.queueSync();
-  renderBoard(); renderHand(); renderPlayers(); renderEffects(); renderPhase(); renderLog();
+  renderBoard(); renderHand(); renderPlayers(); renderEffects(); renderPhase(); renderChallenge(); renderLog();
+}
+
+// Free disputes: the bar that lets the player on move dispute the rival's last move.
+function renderChallenge() {
+  const el = $('#challengeBar');
+  const ch = S.challenge;
+  const p = S.turn;
+  if (!ch || !ch.m || ch.p !== 1 - p || !myMoveInput() || ui.targeting) { el.className = ''; el.innerHTML = ''; return; }
+  const pc = S.board[ch.m.tr] && S.board[ch.m.tr][ch.m.tc];
+  if (!pc) { el.className = ''; el.innerHTML = ''; return; }
+  const bv = beliefVerdict(p, pc);
+  const sure = hasCard(p, 'sure');
+  el.className = 'show ' + bv.cls;
+  el.innerHTML = `<span>⚖ <b class="who ${PL[ch.p].cls}">${nm(ch.p)}</b> moved ${glyph(pc.type)} ${sqName(ch.m.fr, ch.m.fc)}→${sqName(ch.m.tr, ch.m.tc)}. Not theirs?</span>
+    <span class="cb-hint">${bv.txt}</span>
+    <span class="cb-btns"><button class="btn small" id="cbDispute">Dispute${WRONG_DISPUTE_TURNS ? ` (risk ${WRONG_DISPUTE_TURNS === 1 ? 'a turn' : WRONG_DISPUTE_TURNS + ' turns'})` : ''}</button>
+    ${sure ? '<button class="btn small gold" id="cbSure">Sure Dispute</button>' : ''}</span>
+    <span class="cb-note">Moving or playing a card accepts the move.</span>`;
+  $('#cbDispute').onclick = () => humanDispute(false).catch(swallowAbort);
+  if (sure) $('#cbSure').onclick = () => humanDispute(true).catch(swallowAbort);
 }
 const flashVisible = id => { const w = S.flash.get(id); return w !== undefined && (w === 'all' || w === S.viewer); };
 
@@ -925,7 +1076,7 @@ function renderHand() {
     w.style.setProperty('--rot', `${(i - (n - 1) / 2) * 3}deg`);
     const c = cardEl(card.key);
     const def = CARDS[card.key];
-    if (def.kind === 'reaction') { c.classList.add('reactive'); c.title = 'Reaction: you will be asked when it can be played.'; }
+    if (def.kind === 'reaction') { c.classList.add('reactive'); if (card.key === 'sure') c.classList.add('manual'); c.title = card.key === 'sure' ? 'Use it from the Dispute bar above the board.' : 'Reaction: you will be asked when it can be played.'; }
     else if (canAct) { c.classList.add('playable'); c.onclick = () => humanPlayCard(card.uid).catch(swallowAbort); c.title = 'Click to play'; }
     else { c.classList.add('unplayable'); c.title = S.usedAction ? 'Only one action card per turn' : 'Play on your turn, before moving'; }
     w.appendChild(c);
@@ -962,6 +1113,7 @@ function renderEffects() {
   if (NET.role && NET.code) chips.push(`<span class="chip gold">Room ${NET.code}${NET.role === 'host' && !NET.connected() ? ' · friend offline' : ''}</span>`);
   if (S.variant === '960') chips.push(`<span class="chip">Chess960 · ${S.back}</span>`);
   else chips.push(`<span class="chip" title="The classic R N B Q K B N R order would let a queen capture the king on move one, since any piece can capture any piece.">Monochrome setup · ${S.back}</span>`);
+  if (S.freeDisputes) chips.push('<span class="chip" title="Anyone may dispute any move; a wrong dispute costs a turn.">Free disputes</span>');
   if (S.ownership === 'classic') chips.push('<span class="chip" title="Sol owns the bottom 16 pieces, Luna the top 16. Remember which are yours.">Classic ownership · memory</span>');
   for (const g of ['red', 'white']) if (S.frost[g] >= S.turnCount) chips.push(`<span class="chip ${g}">❄ ${gName(g)} frozen</span>`);
   if (S.alibi) chips.push('<span class="chip gold">✉ Alibi active</span>');
@@ -983,7 +1135,7 @@ function renderPhase() {
       ${host ? '<button class="btn small" id="pbRematch">Rematch</button>' : ''}
       <button class="btn small" id="pbNew">${S.mode === 'online' ? 'Leave' : 'New game'}</button>`;
     $('#pbNew').onclick = goMenu;
-    if (host) $('#pbRematch').onclick = () => newGame('online', S.variant, S.names, S.ownership);
+    if (host) $('#pbRematch').onclick = () => newGame('online', S.variant, S.names, S.ownership, S.freeDisputes);
     return;
   }
   if (ui.targeting) {
@@ -1083,7 +1235,8 @@ function rulesHTML() {
   const cards = Object.keys(CARDS).map(k => {
     const tmp = document.createElement('div');
     tmp.className = 'rc';
-    tmp.innerHTML = `<span class="cnt">×${CARDS[k].count}</span>`;
+    const a = deckCounts(false)[k], b = deckCounts(true)[k];
+    tmp.innerHTML = `<span class="cnt">${a === b ? '×' + a : '×' + a + ' / ' + b}</span>`;
     tmp.appendChild(cardEl(k));
     return tmp.outerHTML;
   }).join('');
@@ -1111,11 +1264,14 @@ function rulesHTML() {
     <li>If it was theirs: the disputer <b>loses a turn</b>.</li>
     <li>The mover may answer with <b>Counter-dispute</b> to cancel the dispute with nothing revealed.</li>
   </ul>
+  <h4>Free disputes</h4>
+  <p>With <b>Free disputes</b> on (automatic with classic ownership), you don’t need a card to dispute: at the start of your turn a <b>Dispute bar</b> lets you challenge your rival’s last move. Moving or playing an action card means you accept it. A wrong dispute still costs you a turn, so only dispute when you’re confident. Dispute cards are replaced by <b>Sure Disputes</b>, which remove that risk, and the deck gets more Counter-disputes and Alibis to keep bluffing alive. When your king is captured, or your rival used Double Time, you are asked straight away.</p>
   <h4>Colours</h4>
   <p>Separately from ownership, each non-king piece wears a public colour on its base: <b style="color:#ff8a92">red</b>, <b>white</b> or plain. Colour has nothing to do with who owns a piece — it’s what Frost, Purge, Shuffle and Paintbrush act on, and it hits both players alike. Starting colours are random.</p>
   <h4>Playing online</h4>
   <p>One player hosts and gets a short code; the friend enters it (or opens the invite link). The two browsers connect directly. The host’s browser runs the game and sends the guest only what the guest is allowed to see.</p>
   <h4>The deck — ${total} cards, shared</h4>
+  <p class="note">Where a card shows two numbers, the second is the count with Free disputes on.</p>
   <div class="rules-cards">${cards}</div>`;
 }
 function showRules() {
