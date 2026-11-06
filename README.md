@@ -28,7 +28,7 @@ A shared 40-card deck, presented with a nod to Balatro, adds Counter-disputes, A
 3. Both kings are public, and only a king's owner may move it.
 4. A piece's owner is revealed to everyone when it is captured or disputed.
 5. Each non-king piece also wears a public **colour** (red, white or plain). Colour is unrelated to ownership. It's what Frost, Purge, Shuffle and Paintbrush act on.
-6. The default back rank is `R B Q N K N B R`, so no piece threatens a king at the start. The Chess960 option only deals positions without a queen or rook next to the king (172 of the 960).
+6. The default back rank, the **Monochrome setup**, is `R B Q N K N B R`. It isn't the classic `R N B Q K B N R` on purpose: since any piece can capture any piece, a queen beside the king could capture it on move one, so knights guard the kings instead. The Chess960 option only deals positions without a queen or rook next to the king (172 of the 960).
 
 The full rules and the card list are in the in-game **Rules** screen.
 

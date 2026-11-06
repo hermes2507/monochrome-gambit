@@ -392,6 +392,7 @@ async function gameLoop() {
   try {
     log(`New game! The pieces are dealt. ${pname(S.turn)} ${vb(S.turn, 'move')} first.`, 'hot');
     if (S.variant === '960') log(`Chess960 back rank: <b>${S.back.split('').join(' ')}</b>`, 'cool');
+    else log(`Monochrome setup: <b>${S.back.split('').join(' ')}</b>. Knights guard the kings, because in the classic order the queen could capture the king on move one.`, 'cool');
     render();
     while (!S.winner) {
       await playTurn();
@@ -929,6 +930,7 @@ function renderEffects() {
   const chips = [];
   if (NET.role && NET.code) chips.push(`<span class="chip gold">Room ${NET.code}${NET.role === 'host' && !NET.connected() ? ' · friend offline' : ''}</span>`);
   if (S.variant === '960') chips.push(`<span class="chip">Chess960 · ${S.back}</span>`);
+  else chips.push(`<span class="chip" title="The classic R N B Q K B N R order would let a queen capture the king on move one, since any piece can capture any piece.">Monochrome setup · ${S.back}</span>`);
   for (const g of ['red', 'white']) if (S.frost[g] >= S.turnCount) chips.push(`<span class="chip ${g}">❄ ${gName(g)} frozen</span>`);
   if (S.alibi) chips.push('<span class="chip gold">✉ Alibi active</span>');
   if (S.extraMove) chips.push('<span class="chip gold">⧗ Extra move</span>');
@@ -1064,7 +1066,7 @@ function rulesHTML() {
   <ul>
     <li><b>Draw</b> 1 card (hand limit ${RULES.HAND_MAX}).</li>
     <li>Optionally play <b>1 action card</b>.</li>
-    <li><b>Move any piece</b> (except the rival’s king, which is public) using normal chess movement. The default back rank is <b>R B Q N K N B R</b>, so kings start out of reach. With <b>Chess960</b> on, the back rank is shuffled each game (mirrored for both sides, bishops on opposite colours, king between the rooks), and never deals a queen or rook right beside a king. Any piece may capture any other piece. Pawns move toward the far side from where they started and promote to queens. No castling, no en passant, no check: <b>capture the rival’s king to win</b>.</li>
+    <li><b>Move any piece</b> (except the rival’s king, which is public) using normal chess movement. The default back rank, the <b>Monochrome setup</b>, is <b>R B Q N K N B R</b>: in the classic order the queen beside the king could capture it on move one, so knights guard the kings instead. With <b>Chess960</b> on, the back rank is shuffled each game (mirrored for both sides, bishops on opposite colours, king between the rooks), and never deals a queen or rook right beside a king. Any piece may capture any other piece. Pawns move toward the far side from where they started and promote to queens. No castling, no en passant, no check: <b>capture the rival’s king to win</b>.</li>
     <li>Moving a piece that isn’t yours is a <b>bluff</b>. It’s perfectly legal… unless you get caught.</li>
   </ul>
   <h4>Disputes</h4>

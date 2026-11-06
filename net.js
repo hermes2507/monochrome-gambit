@@ -435,6 +435,7 @@ async function startScreen() {
     <label class="field">Your name <input id="optName" maxlength="16" placeholder="Sol" value="${esc(NET.myName)}"></label>
     <label class="opt"><input type="checkbox" id="opt960" ${prefVariant === '960' ? 'checked' : ''}>
       <span><b>Chess960</b> — shuffle the back rank every game</span></label>
+    <p class="note setup-note">Unticked, every game uses the <b>Monochrome setup</b>: R B Q N K N B R. The classic order isn’t safe here: since any piece can capture any piece, the queen beside the king could capture it on move one.</p>
     <div class="menu-sec">On this device</div>
     <div class="menu-row">
       <button class="btn gold" data-val="ai">Play vs AI</button>

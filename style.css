@@ -398,3 +398,4 @@ main {
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 .about a, .modal a { color: var(--luna); }
 @media (max-width: 420px) { .menu-row { grid-template-columns: 1fr; } }
+.setup-note { margin: 6px 2px 0; }
