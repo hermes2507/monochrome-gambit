@@ -106,7 +106,7 @@ function viewFor(v) {
     belief: v === 0 ? [pc.belief[0], null] : [null, pc.belief[1]],
   });
   return {
-    gid: S.gid, variant: S.variant, back: S.back, names: S.names,
+    gid: S.gid, variant: S.variant, back: S.back, names: S.names, ownership: S.ownership,
     board: S.board.map(row => row.map(pc => pc ? hide(pc) : null)),
     captured: S.captured.map(hide),
     deckN: S.deck.length, discard: S.discard,
@@ -193,7 +193,7 @@ function hostOnData(conn, d) {
       NET.started = true;
       const guest = cleanName(d.name) || PL[1].name;
       toast(`${guest} joined!`);
-      newGame('online', prefVariant, [NET.myName || PL[0].name, guest]);
+      newGame('online', prefVariant, [NET.myName || PL[0].name, guest], prefOwnership);
     } else {
       toast(`${nm(1)} is back!`);
       NET.flush(true);
@@ -399,6 +399,7 @@ function cleanView(s) {
     isView: true, mode: 'online', viewer: 1, uid: 0,
     gid: String(s.gid || '').slice(0, 24),
     variant: s.variant === '960' ? '960' : 'standard',
+    ownership: s.ownership === 'classic' ? 'classic' : 'random',
     back: /^[KQRBN]{8}$/.test(s.back) ? s.back : STANDARD_BACK,
     names: [0, 1].map(p => cleanName(s.names && s.names[p]) || PL[p].name),
     board: Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => piece(s.board && s.board[r] && s.board[r][c]))),
@@ -436,6 +437,9 @@ async function startScreen() {
     <label class="opt"><input type="checkbox" id="opt960" ${prefVariant === '960' ? 'checked' : ''}>
       <span><b>Chess960</b> — shuffle the back rank every game</span></label>
     <p class="note setup-note">Unticked, every game uses the <b>Monochrome setup</b>: R B Q N K N B R. The classic order isn’t safe here: since any piece can capture any piece, the queen beside the king could capture it on move one.</p>
+    <label class="opt"><input type="checkbox" id="optRandOwn" ${prefOwnership === 'random' ? 'checked' : ''}>
+      <span><b>Randomise ownership</b> — deal the owner of every piece at random</span></label>
+    <p class="note setup-note">Unticked, ownership is like regular chess: you own the bottom 16 pieces and your rival the top 16. They still look identical and carry no badges, so you must <b>remember</b> which are yours.</p>
     <div class="menu-sec">On this device</div>
     <div class="menu-row">
       <button class="btn gold" data-val="ai">Play vs AI</button>
@@ -451,13 +455,17 @@ async function startScreen() {
     prefVariant = e.target.checked ? '960' : 'standard';
     try { localStorage.setItem('mg-variant', prefVariant); } catch (err) { /* storage unavailable */ }
   };
+  $('#optRandOwn').onchange = e => {
+    prefOwnership = e.target.checked ? 'random' : 'classic';
+    try { localStorage.setItem('mg-ownership', prefOwnership); } catch (err) { /* storage unavailable */ }
+  };
   $('#optName').oninput = e => { NET.myName = cleanName(e.target.value); saveName(NET.myName); };
   const choice = await pending;
   if (t !== TOKEN) return;
   switch (choice) {
     case 'rules': showRules(); return startScreen();
     case 'about': showAbout(); return startScreen();
-    case 'ai': case 'hotseat': NET.leave(); return newGame(choice, prefVariant);
+    case 'ai': case 'hotseat': NET.leave(); return newGame(choice, prefVariant, null, prefOwnership);
     case 'host': return hostFlow();
     case 'join': return joinFlow();
   }

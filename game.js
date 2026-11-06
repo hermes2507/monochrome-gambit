@@ -116,8 +116,15 @@ function backRank960() {
 
 let prefVariant = 'standard';
 try { if (localStorage.getItem('mg-variant') === '960') prefVariant = '960'; } catch (e) { /* storage unavailable */ }
+// 'random': ownership dealt at random (default). 'classic': Sol owns the bottom 16, Luna the top 16.
+let prefOwnership = 'random';
+try { if (localStorage.getItem('mg-ownership') === 'classic') prefOwnership = 'classic'; } catch (e) { /* storage unavailable */ }
 
-function newGame(mode, variant = prefVariant, names = null) {
+// Classic ownership is a memory challenge: humans get no badges for unrevealed pieces.
+// The AI starts with perfect knowledge, so it forgets a little each turn to stay bluffable.
+const AI_FORGET = 0.03;
+
+function newGame(mode, variant = prefVariant, names = null, ownership = prefOwnership) {
   TOKEN++;
   closeModal(); hideHandoff();
   ui.sel = null; ui.targets = []; ui.resolveMove = null; ui.targeting = null; ui.busy = false; ui.sentMove = false;
@@ -132,18 +139,29 @@ function newGame(mode, variant = prefVariant, names = null) {
     B[6][c] = mk('P', -1); B[7][c] = mk(back[c]);
   }
   const all = B.flat().filter(Boolean);
-  // Random but fair ownership: each type is split evenly between the players.
-  for (const t of 'KQRBNP') {
-    const l = shuffle(all.filter(p => p.type === t));
-    l.forEach((p, i) => { p.owner = i < l.length / 2 ? 0 : 1; });
+  if (ownership === 'classic') {
+    // Regular chess sides: Sol owns rows 6–7 (bottom), Luna rows 0–1 (top).
+    for (let c = 0; c < 8; c++) { B[0][c].owner = B[1][c].owner = 1; B[6][c].owner = B[7][c].owner = 0; }
+  } else {
+    // Random but fair ownership: each type is split evenly between the players.
+    for (const t of 'KQRBNP') {
+      const l = shuffle(all.filter(p => p.type === t));
+      l.forEach((p, i) => { p.owner = i < l.length / 2 ? 0 : 1; });
+    }
   }
   // Random colours: a third red, a third white, a third plain. Kings are never coloured.
   shuffle(all.filter(p => p.type !== 'K')).forEach((p, i) => { p.glaze = GLAZES[i % 3]; });
-  // Both kings are public. Each player secretly knows only some of their own pieces.
+  // Both kings are public.
   for (const p of all) if (p.type === 'K') { p.revealed = true; p.belief = [p.owner, p.owner]; }
-  for (const pl of [0, 1]) {
-    shuffle(all.filter(p => p.owner === pl && p.type !== 'K'))
-      .slice(0, RULES.KNOWN_START).forEach(p => { p.belief[pl] = pl; });
+  if (ownership === 'classic') {
+    // Memory challenge: humans track their pieces themselves (no badges); the AI starts knowing all.
+    if (mode === 'ai') for (const p of all) p.belief[1] = p.owner;
+  } else {
+    // Each player secretly knows only some of their own pieces.
+    for (const pl of [0, 1]) {
+      shuffle(all.filter(p => p.owner === pl && p.type !== 'K'))
+        .slice(0, RULES.KNOWN_START).forEach(p => { p.belief[pl] = pl; });
+    }
   }
 
   const deck = [];
@@ -151,7 +169,7 @@ function newGame(mode, variant = prefVariant, names = null) {
   shuffle(deck);
 
   S = {
-    mode, variant, back, names, gid: Math.random().toString(36).slice(2), gen: TOKEN,
+    mode, variant, back, names, ownership, gid: Math.random().toString(36).slice(2), gen: TOKEN,
     board: B, captured: [], deck, discard: [], hands: [[], []],
     skips: [0, 0], frost: { red: 0, white: 0 },
     turn: rnd(2), turnCount: 1,
@@ -393,6 +411,7 @@ async function gameLoop() {
     log(`New game! The pieces are dealt. ${pname(S.turn)} ${vb(S.turn, 'move')} first.`, 'hot');
     if (S.variant === '960') log(`Chess960 back rank: <b>${S.back.split('').join(' ')}</b>`, 'cool');
     else log(`Monochrome setup: <b>${S.back.split('').join(' ')}</b>. Knights guard the kings, because in the classic order the queen could capture the king on move one.`, 'cool');
+    if (S.ownership === 'classic') log(`Classic ownership: ${nm(0)} owns the bottom 16 pieces, ${nm(1)} the top 16. No badges: remember which pieces are yours!`, 'cool');
     render();
     while (!S.winner) {
       await playTurn();
@@ -418,6 +437,7 @@ async function playTurn() {
     return;
   }
 
+  if (isAI(p) && S.ownership === 'classic') aiForget(p);
   await handoff(p);
   drawCards(p, 1);
   S.phase = 'move';
@@ -540,11 +560,11 @@ async function endGame() {
   if (S.mode === 'online') {
     NET.sendNow({ t: 'fx', k: 'gameover', a: [html + '<p class="note">The host can start a rematch.</p>'] });
     const again = await W(modal(html, [{ label: 'Look at board', value: 'look', cls: 'grey' }, { label: 'Rematch', value: 'again', cls: 'green' }]));
-    if (again === 'again') newGame('online', S.variant, S.names);
+    if (again === 'again') newGame('online', S.variant, S.names, S.ownership);
     return;
   }
   const again = await W(modal(html, [{ label: 'Look at board', value: 'look', cls: 'grey' }, { label: 'Play again', value: 'again', cls: 'green' }]));
-  if (again === 'again') newGame(S.mode, S.variant);
+  if (again === 'again') newGame(S.mode, S.variant, null, S.ownership);
 }
 
 /* ------------------------------- Hotseat -------------------------------- */
@@ -568,6 +588,7 @@ function beliefVerdict(v, pc) {
   const b = pc.belief[v];
   if (b === v) return { cls: 'good', txt: 'You believe this piece is <b>yours</b>.' };
   if (b === 1 - v) return { cls: 'bad', txt: `You believe this piece is <b>${nm(1 - v)}’s</b>.` };
+  if (S.ownership === 'classic') return { cls: 'unk', txt: 'Classic ownership: only your memory knows whose piece this is.' };
   return { cls: 'unk', txt: `You don’t know who owns this piece (≈${Math.round(pMine(v) * 100)}% of your unknowns are yours).` };
 }
 
@@ -811,6 +832,14 @@ function aiWantsDispute(o, pc, info, kingCap) {
   return ev > (nDisp > 1 ? 0.2 : 0.8) || (Math.random() < 0.08 && pm > 0.35);
 }
 
+// Memory challenge: the AI loses track of some unrevealed pieces each turn, as a person would.
+function aiForget(p) {
+  for (const pc of onBoard()) {
+    if (pc.revealed || pc.type === 'K' || pc.belief[p] === null) continue;
+    if (Math.random() < AI_FORGET) pc.belief[p] = null;
+  }
+}
+
 function aiWantsCounter(p, pc) {
   return pc.belief[p] !== p; // only protect genuine bluffs
 }
@@ -916,7 +945,9 @@ function renderPlayers() {
     let known = '';
     if (S.viewer === p) {
       const k = onBoard().filter(pc => pc.belief[p] === p).length;
-      known = `<div class="pb-row" style="display:block">You know <b>${k}</b> of your pieces on the board</div>`;
+      known = S.ownership === 'classic'
+        ? `<div class="pb-row" style="display:block">Memory mode: you started with the ${p === 0 ? 'bottom' : 'top'} 16 pieces</div>`
+        : `<div class="pb-row" style="display:block">You know <b>${k}</b> of your pieces on the board</div>`;
     }
     el.innerHTML = `<div class="pb-head"><span class="pb-sym">${PL[p].sym}</span>${nm(p)}<span class="pb-tag">${tag}</span></div>
       <div class="pb-row">Hand: <b>${S.hands[p].length}</b> ${backs}</div>
@@ -931,6 +962,7 @@ function renderEffects() {
   if (NET.role && NET.code) chips.push(`<span class="chip gold">Room ${NET.code}${NET.role === 'host' && !NET.connected() ? ' · friend offline' : ''}</span>`);
   if (S.variant === '960') chips.push(`<span class="chip">Chess960 · ${S.back}</span>`);
   else chips.push(`<span class="chip" title="The classic R N B Q K B N R order would let a queen capture the king on move one, since any piece can capture any piece.">Monochrome setup · ${S.back}</span>`);
+  if (S.ownership === 'classic') chips.push('<span class="chip" title="Sol owns the bottom 16 pieces, Luna the top 16. Remember which are yours.">Classic ownership · memory</span>');
   for (const g of ['red', 'white']) if (S.frost[g] >= S.turnCount) chips.push(`<span class="chip ${g}">❄ ${gName(g)} frozen</span>`);
   if (S.alibi) chips.push('<span class="chip gold">✉ Alibi active</span>');
   if (S.extraMove) chips.push('<span class="chip gold">⧗ Extra move</span>');
@@ -951,7 +983,7 @@ function renderPhase() {
       ${host ? '<button class="btn small" id="pbRematch">Rematch</button>' : ''}
       <button class="btn small" id="pbNew">${S.mode === 'online' ? 'Leave' : 'New game'}</button>`;
     $('#pbNew').onclick = goMenu;
-    if (host) $('#pbRematch').onclick = () => newGame('online', S.variant, S.names);
+    if (host) $('#pbRematch').onclick = () => newGame('online', S.variant, S.names, S.ownership);
     return;
   }
   if (ui.targeting) {
@@ -967,6 +999,7 @@ function renderPhase() {
       const b = pc.belief[p];
       if (b === p) hint = `<span class="hint-good">✔ ${TYPES[pc.type].n}: yours — safe to move</span>`;
       else if (b === 1 - p) hint = `<span class="hint-bad">⚠ ${TYPES[pc.type].n}: ${nm(1 - p)}’s — moving it is a bluff!</span>`;
+      else if (S.ownership === 'classic') hint = `<span class="hint-unk">? ${TYPES[pc.type].n}: is it yours? Moving a rival piece is a bluff</span>`;
       else hint = `<span class="hint-unk">? ${TYPES[pc.type].n}: unknown owner (≈${Math.round(pMine(p) * 100)}% chance it’s yours)</span>`;
     }
     const act = S.usedAction ? '' : ' · <span style="color:var(--dim)">may play 1 action card first</span>';
@@ -1056,12 +1089,14 @@ function rulesHTML() {
   }).join('');
   const total = Object.values(CARDS).reduce((a, c) => a + c.count, 0);
   return `<h2>How to play</h2>
-  <p>Every piece is carved from the same bone. Secretly, each one belongs to <b class="who sol">☀ Sol</b> or <b class="who luna">☾ Luna</b> — ownership is dealt at random (each player gets one king and an even split of every piece type).</p>
+  <p>Every piece is carved from the same bone. Secretly, each one belongs to <b class="who sol">☀ Sol</b> or <b class="who luna">☾ Luna</b> — by default ownership is dealt at random (each player gets one king and an even split of every piece type).</p>
   <h4>What you know</h4>
   <ul>
     <li>Both kings are public. You also secretly know <b>${RULES.KNOWN_START}</b> of your other 15 pieces (dashed badge). The rest of your army is hidden even from you.</li>
     <li>A piece’s owner is revealed to everyone when it is captured or disputed (solid badge).</li>
   </ul>
+  <h4>Classic ownership (memory challenge)</h4>
+  <p>Untick <b>Randomise ownership</b> in the menu and the sides work like regular chess: Sol owns the bottom 16 pieces and Luna the top 16. They still all look the same, and no badges are shown until a piece is revealed, so you have to <b>remember</b> which pieces are yours as they move. Luna, the AI, starts out knowing every piece but forgets a few each turn, so bluffing it can work.</p>
   <h4>Your turn</h4>
   <ul>
     <li><b>Draw</b> 1 card (hand limit ${RULES.HAND_MAX}).</li>

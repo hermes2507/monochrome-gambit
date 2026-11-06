@@ -20,6 +20,7 @@ A shared 40-card deck, presented with a nod to Balatro, adds Counter-disputes, A
 | **Hotseat** | Two players on one device, with "pass the device" screens that hide each player's secrets. |
 | **Online** | One player hosts and gets a 5-letter code (and an invite link); the friend types it in. |
 | **Chess960** | Optional for every mode: the back rank is shuffled each game. |
+| **Randomise ownership** | On by default. Untick it for classic sides (you own the bottom 16 pieces, your rival the top 16). Pieces still look identical and carry no badges, so it becomes a memory challenge. The AI starts knowing every piece but forgets a few each turn. |
 
 ## Rules in brief
 
