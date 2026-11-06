@@ -19,6 +19,7 @@
     <header>
       <h1>MONOCHROME <span>GAMBIT</span></h1>
       <div class="hdr-btns">
+        <button class="btn small" id="btnCardMode">Cards: timed</button>
         <button class="btn small" id="btnAbout">About</button>
         <button class="btn small" id="btnRules">Rules</button>
         <button class="btn small" id="btnNew">New game</button>
@@ -40,6 +41,10 @@
       </section>
 
       <aside id="right">
+        <div class="panel" id="lastCard">
+          <h3>Cards played</h3>
+          <div id="lastCardBody"></div>
+        </div>
         <div class="panel" id="legend">
           <h3>Legend</h3>
           <div class="lg"><span class="lg-disc red"></span> Red colour</div>

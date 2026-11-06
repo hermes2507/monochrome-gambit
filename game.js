@@ -263,6 +263,7 @@ async function useCard(p, key) {
   if (i < 0) return;
   hand.splice(i, 1);
   S.discard.push(key);
+  noteCard(p, key);
   render();
   await W(showCardAll(p, key));
 }
@@ -273,6 +274,7 @@ async function playCard(p, uid, opts = {}) {
   if (i < 0) return;
   const card = hand.splice(i, 1)[0];
   S.discard.push(card.key);
+  noteCard(p, card.key);
   if (CARDS[card.key].kind === 'action') { S.usedAction = true; S.challenge = null; } // acting accepts the rival's move
   ui.sel = null; ui.targets = [];
   render();
@@ -979,7 +981,7 @@ function aiWantsCounter(p, pc) {
 function render() {
   if (!S) return;
   if (NET.role === 'host' && S.mode === 'online') NET.queueSync();
-  renderBoard(); renderHand(); renderPlayers(); renderEffects(); renderPhase(); renderChallenge(); renderLog();
+  renderBoard(); renderHand(); renderPlayers(); renderEffects(); renderPhase(); renderChallenge(); renderLastCard(); renderLog();
 }
 
 // Free disputes: the bar that lets the player on move dispute the rival's last move.
@@ -1212,17 +1214,89 @@ function banner(big, small, cls = '') {
   return new Promise(res => { clearTimeout(banner.t); banner.t = setTimeout(() => { el.className = ''; res(); }, 1500); });
 }
 
-function showCard(p, key) {
+// Card showcase. 'timed' mode dismisses itself after CARD_SHOW_MS (click/Space skips);
+// 'hold' mode waits for a click. Re-opening a past card from the panel always holds.
+const CARD_SHOW_MS = 2600;
+let prefCardHold = 'timed';
+try { if (localStorage.getItem('mg-cardhold') === 'hold') prefCardHold = 'hold'; } catch (e) { /* storage unavailable */ }
+
+function showCard(p, key, { hold = prefCardHold === 'hold', label = null } = {}) {
   const el = $('#cardShow');
-  el.className = '';
+  if (showCard.finish) showCard.finish(); // close the previous one first
+  clearTimeout(showCard.t);
   el.replaceChildren();
+  const wrap = document.createElement('div');
+  wrap.className = 'cs-wrap';
   const lab = document.createElement('div');
   lab.className = `cs-lab who ${PL[p].cls}`;
-  lab.textContent = `${PL[p].sym} ${isMine(p) && !isYou(p) ? 'You play' : pname(p) + ' ' + vb(p, 'play')}`;
-  el.append(lab, cardEl(key));
-  void el.offsetWidth;
+  lab.textContent = `${PL[p].sym} ${label || (isMine(p) && !isYou(p) ? 'You play' : pname(p) + ' ' + vb(p, 'play'))}`;
+  const hint = document.createElement('div');
+  hint.className = 'cs-hint';
+  hint.textContent = hold ? 'Click or press Space to continue' : 'Click or press Space to skip';
+  wrap.append(lab, cardEl(key));
+  if (!hold) {
+    const bar = document.createElement('div');
+    bar.className = 'cs-bar';
+    bar.innerHTML = `<i style="animation-duration:${CARD_SHOW_MS}ms"></i>`;
+    wrap.append(bar);
+  }
+  wrap.append(hint);
+  el.append(wrap);
   el.className = 'show';
-  return new Promise(res => setTimeout(() => { el.className = ''; res(); }, 1300));
+  return new Promise(res => {
+    let done = false;
+    const onKey = e => { if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); finish(); } };
+    const finish = () => {
+      if (done) return;
+      done = true;
+      showCard.finish = null;
+      clearTimeout(showCard.t);
+      el.onclick = null;
+      document.removeEventListener('keydown', onKey, true);
+      el.className = 'show out';
+      setTimeout(() => { if (el.classList.contains('out')) { el.className = ''; el.replaceChildren(); } }, 300);
+      res();
+    };
+    showCard.finish = finish;
+    el.onclick = finish;
+    document.addEventListener('keydown', onKey, true);
+    if (!hold) showCard.t = setTimeout(finish, CARD_SHOW_MS);
+  });
+}
+
+function setCardHold(mode) {
+  prefCardHold = mode;
+  try { localStorage.setItem('mg-cardhold', mode); } catch (e) { /* storage unavailable */ }
+  const btn = $('#btnCardMode');
+  if (btn) {
+    btn.textContent = mode === 'hold' ? 'Cards: hold' : 'Cards: timed';
+    btn.title = mode === 'hold'
+      ? 'Played cards stay on screen until you click. Click to switch to timed.'
+      : `Played cards show for ${CARD_SHOW_MS / 1000}s (click to skip). Click to keep them until you click.`;
+  }
+}
+
+// Remember recently played cards (public information) for the "Cards played" panel.
+function noteCard(p, key) {
+  S.cardLog = [{ p, key }, ...(S.cardLog || [])].slice(0, 5);
+}
+function renderLastCard() {
+  const el = $('#lastCardBody');
+  const list = (S.cardLog || []).filter(c => CARDS[c.key]);
+  if (!list.length) { el.innerHTML = '<div class="lc-empty">No cards played yet.</div>'; return; }
+  const [last, ...prev] = list;
+  const who = c => isMine(c.p) ? 'You' : nm(c.p);
+  el.innerHTML = `<div class="lc-body">
+    <div class="lc-mini" title="Click to read it full size"></div>
+    <div class="lc-side">
+      <div class="lc-who who ${PL[last.p].cls}">${PL[last.p].sym} ${who(last)}</div>
+      ${prev.length ? '<div class="note">Earlier:</div>' : ''}
+      <div class="lc-prev">${prev.map((c, i) => `<button data-i="${i + 1}">${PL[c.p].sym} ${CARDS[c.key].name}</button>`).join('')}</div>
+    </div></div>`;
+  $('.lc-mini', el).appendChild(cardEl(last.key));
+  const open = c => showCard(c.p, c.key, { hold: true, label: `${who(c)} played` });
+  $('.lc-mini', el).onclick = () => open(last);
+  el.querySelectorAll('.lc-prev button').forEach(b => { b.onclick = () => open(list[+b.dataset.i]); });
 }
 
 function toast(msg) {

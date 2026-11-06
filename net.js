@@ -108,6 +108,7 @@ function viewFor(v) {
   return {
     gid: S.gid, variant: S.variant, back: S.back, names: S.names, ownership: S.ownership,
     freeDisputes: S.freeDisputes,
+    cardLog: S.cardLog || [],
     challenge: S.challenge ? { p: S.challenge.p, id: S.challenge.id, m: S.challenge.m } : null,
     board: S.board.map(row => row.map(pc => pc ? hide(pc) : null)),
     captured: S.captured.map(hide),
@@ -421,6 +422,7 @@ function cleanView(s) {
     variant: s.variant === '960' ? '960' : 'standard',
     ownership: s.ownership === 'classic' ? 'classic' : 'random',
     freeDisputes: !!s.freeDisputes,
+    cardLog: arr(s.cardLog, 5).filter(c => c && P(c.p) !== null && CARDS[c.key]).map(c => ({ p: c.p, key: c.key })),
     challenge: s.challenge && P(s.challenge.p) !== null && move(s.challenge.m)
       ? { p: s.challenge.p, id: int(s.challenge.id), m: move(s.challenge.m) } : null,
     back: /^[KQRBN]{8}$/.test(s.back) ? s.back : STANDARD_BACK,
@@ -551,6 +553,8 @@ $('#board').addEventListener('click', e => {
 });
 $('#btnRules').onclick = showRules;
 $('#btnAbout').onclick = showAbout;
+$('#btnCardMode').onclick = () => setCardHold(prefCardHold === 'hold' ? 'timed' : 'hold');
+setCardHold(prefCardHold);
 $('#btnNew').onclick = goMenu;
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && ui.targeting) { const res = ui.targeting.resolve; ui.targeting = null; res(null); }
