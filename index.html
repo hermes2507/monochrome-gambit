@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monochrome Gambit</title>
+  <meta name="description" content="A bluffing chess variant: every piece looks the same and secretly belongs to someone. Play vs AI, hotseat, or online with a friend.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%232b4e48'/%3E%3Ctext x='50' y='78' font-size='76' text-anchor='middle' fill='%23f3e8cf'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Pixelify+Sans:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="bg"></div>
+  <div id="crt"></div>
+
+  <div id="app">
+    <header>
+      <h1>MONOCHROME <span>GAMBIT</span></h1>
+      <div class="hdr-btns">
+        <button class="btn small" id="btnAbout">About</button>
+        <button class="btn small" id="btnRules">Rules</button>
+        <button class="btn small" id="btnNew">New game</button>
+      </div>
+    </header>
+
+    <main>
+      <aside id="left">
+        <div class="pbox" id="pbox1"></div>
+        <div class="panel" id="effects"></div>
+        <div class="pbox" id="pbox0"></div>
+      </aside>
+
+      <section id="center">
+        <div id="phaseBar"></div>
+        <div id="boardWrap"><div id="board"></div></div>
+        <div id="handArea"><div id="hand"></div></div>
+      </section>
+
+      <aside id="right">
+        <div class="panel" id="legend">
+          <h3>Legend</h3>
+          <div class="lg"><span class="lg-disc red"></span> Red colour</div>
+          <div class="lg"><span class="lg-disc white"></span> White colour</div>
+          <div class="lg"><span class="lg-disc none"></span> Plain (no colour)</div>
+          <div class="lg"><span class="badge sol priv lg-b">☀</span><span class="badge luna priv lg-b">☾</span> Owner you know (secret)</div>
+          <div class="lg"><span class="badge sol rev lg-b">☀</span><span class="badge luna rev lg-b">☾</span> Owner revealed to all</div>
+          <div class="lg"><span class="lg-q">?</span> No badge = unknown owner</div>
+        </div>
+        <div class="panel" id="logPanel">
+          <h3>Chronicle</h3>
+          <div id="log"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div id="overlay"></div>
+  <div id="rulesOv"></div>
+  <div id="handoff"></div>
+  <div id="banner"></div>
+  <div id="cardShow"></div>
+  <div id="toast"></div>
+
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <script src="game.js"></script>
+  <script src="net.js"></script>
+</body>
+</html>
